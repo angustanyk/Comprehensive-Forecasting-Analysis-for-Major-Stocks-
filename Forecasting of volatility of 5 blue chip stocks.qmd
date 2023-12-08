@@ -1,0 +1,4089 @@
+---
+title: "QAF1 Assignment 2 - Forecasting Volatility"
+author: 
+  - name: "Chee Shuen Ng (1166317)" 
+  - name: "Ye Kai Tan (1164112)"
+  - name: "Yibo Pei (1315983)"
+  - name: "Haowen Bai (1400763)"
+format:
+  pdf:
+    fontfamily: cmbright
+    fontsize: 10pt
+    geometry: 
+      - top = 15mm
+      - left = 15mm
+      - right = 15mm
+      - bottom = 20mm
+    fig-alin: center
+    header-includes:
+      - \usepackage{setspace}
+      - \setstretch{0.95}
+      
+editor: visual
+---
+
+## Abstract
+
+This reports embarks on a comprehensive exploration of volatility forecasting with a focus on realized volatility and weekly log returns. This is achieved by utilizing variations of the Generalized Autoregressive Conditional Heteroskedastic (GARCH) model and the Heterogeneous Autoregressive (HAR) model. The process begins with the identification of the most efficient model for forecasting. This commences with the selection of the optimal Autoregressive (AR) orders on various GARCH (1,1) models using the Akaike Information Criterion (AIC). To further refine our model selection, the GARCH(1,1) models are compared to variations with errors following a student's t-distribution, as well as an array of GARCH variations with AR orders from 0 to 3, and GARCH (p, q) orders from 1 to 3. In this phase, the Root Mean Squared Forecast Error (RMSFE) is used as the principal measure for model selection, with the ones with the lowest RMSFE being selected. The selected models are then compared with Heterogeneous Autoregressive (HAR) models in the final stage of model selection. However, it is found that HAR models do not offer superior in-sample forecasting performance according to the RMSFE, leading to the selection of the GARCH variations for forecasting. These selected models are subsequently utilized to forecast volatility and returns four periods ahead, with the objective of informing investment strategies.
+
+## Introduction
+
+This paper builds upon our previous report, utilizing data from daily stock prices of Apple Inc (AAPL), Microsoft Corp (MSFT), Amazon (AMZN), Nvidia (NVDA), and Berkshire Hathaway (BRK-B) spanning January 25, 1999, to May 05, 2023.
+
+For the purposes of our analysis, these daily stock prices are transformed into weekly log returns, and daily log returns are further converted into weekly realized volatility. The primary objective of this conversion is to construct dynamic models capable of capturing underlying patterns in the data, and accurately forecast returns and volatilities for a four-week period into the future. This is important as financial decisions should consider both the expected returns and risk associated. We aim to harness this information and devise a strategic plan to capitalise on the insights obtained from these forecasts. Capitalising on profitable opportunities helps improve efficiency in the market as it encourages underpriced assets, which have positive expected returns, to be bought and overpriced assets, which have negative expected returns, to be shorted. Such demand and supply forces pushes the stock prices towards its fundamental value.
+
+```{r packages}
+#| echo: false
+#| warning: false
+#| message: false
+rm(list = ls())
+library(FinTS) # for autocortest
+library(fUnitRoots) # for adf test
+library(tseries) # for Jarque Bera test
+library(AER)
+library(xts)
+library(HARModel)
+library(rugarch)
+```
+
+```{r colors}
+#| echo: false
+#| message: false
+# Define colors
+qaf1 = "#17252A"
+qaf2 = "#2B7A28"
+qaf3 = "#3AAFA9"
+qaf4 = "#0099FF"
+qaf5 = "#FF00FF"
+qaf6 = "#9966CC"
+
+qaf2.rgb     = col2rgb(qaf2)
+qaf2.shade1 = rgb(qaf2.rgb[1],qaf2.rgb[2],qaf2.rgb[3], alpha=100, maxColorValue=255)
+qaf2.shade2 = rgb(qaf2.rgb[1],qaf2.rgb[2],qaf2.rgb[3], alpha=80, maxColorValue=255)
+
+qaf3.rgb     = col2rgb(qaf3)
+qaf3.shade1 = rgb(qaf3.rgb[1],qaf3.rgb[2],qaf3.rgb[3], alpha=100, maxColorValue=255)
+qaf3.shade2 = rgb(qaf3.rgb[1],qaf3.rgb[2],qaf3.rgb[3], alpha=80, maxColorValue=255)
+
+qaf4.rgb     = col2rgb(qaf4)
+qaf4.shade1 = rgb(qaf4.rgb[1],qaf4.rgb[2],qaf4.rgb[3], alpha=100, maxColorValue=255)
+qaf4.shade2 = rgb(qaf4.rgb[1],qaf4.rgb[2],qaf4.rgb[3], alpha=80, maxColorValue=255)
+
+qaf5.rgb     = col2rgb(qaf5)
+qaf5.shade1 = rgb(qaf5.rgb[1],qaf5.rgb[2],qaf5.rgb[3], alpha=100, maxColorValue=255)
+qaf5.shade2 = rgb(qaf5.rgb[1],qaf5.rgb[2],qaf5.rgb[3], alpha=80, maxColorValue=255)
+
+qaf6.rgb     = col2rgb(qaf6)
+qaf6.shade1 = rgb(qaf6.rgb[1],qaf6.rgb[2],qaf6.rgb[3], alpha=100, maxColorValue=255)
+qaf6.shade2 = rgb(qaf6.rgb[1],qaf6.rgb[2],qaf6.rgb[3], alpha=80, maxColorValue=255)
+```
+
+```{r stock data}
+#| echo: false
+#| message: false
+# Download Apple's stock prices
+AAPL_yahoo        = "https://query1.finance.yahoo.com/v7/finance/download/AAPL?period1=917222400&period2=1683331200&interval=1d&events=history&includeAdjustedClose=true"
+AAPL_download     = read.csv(AAPL_yahoo)
+# Transform series into log levels
+AAPL          = xts::xts(log(AAPL_download[,6]), as.Date(AAPL_download[,1]))
+# Transform into weekly
+AAPL_w = to.weekly(AAPL, OHLC = FALSE)
+dates_AAPL             = zoo::index(AAPL_w)
+
+# Microsoft
+MSFT_yahoo        = "https://query1.finance.yahoo.com/v7/finance/download/MSFT?period1=917222400&period2=1683331200&interval=1d&events=history&includeAdjustedClose=true"
+MSFT_download     = read.csv(MSFT_yahoo)
+MSFT         = xts::xts(log(MSFT_download[,6]), as.Date(MSFT_download[,1]))
+MSFT_w = to.weekly(MSFT, OHLC = FALSE)
+dates_MSFT             = zoo::index(MSFT_w)
+
+# Amazon
+AMZN_yahoo        = "https://query1.finance.yahoo.com/v7/finance/download/AMZN?period1=917222400&period2=1683331200&interval=1d&events=history&includeAdjustedClose=true"
+AMZN_download     = read.csv(AMZN_yahoo)
+AMZN          = xts::xts(log(AMZN_download[,6]), as.Date(AMZN_download[,1]))
+AMZN_w = to.weekly(AMZN, OHLC = FALSE)
+dates_AMZN             = zoo::index(AMZN_w)
+
+# Nvidia
+NVDA_yahoo        = "https://query1.finance.yahoo.com/v7/finance/download/NVDA?period1=917222400&period2=1683331200&interval=1d&events=history&includeAdjustedClose=true"
+NVDA_download     = read.csv(NVDA_yahoo)
+NVDA        = xts::xts(log(NVDA_download[,6]), as.Date(NVDA_download[,1]))
+NVDA_w = to.weekly(NVDA, OHLC = FALSE)
+dates_NVDA             = zoo::index(NVDA_w)
+
+# Berkshire Hathaway
+BRK_yahoo        = "https://query1.finance.yahoo.com/v7/finance/download/BRK-B?period1=917222400&period2=1683331200&interval=1d&events=history&includeAdjustedClose=true"
+BRK_download     = read.csv(BRK_yahoo)
+BRK          = xts::xts(log(BRK_download[,6]), as.Date(BRK_download[,1]))
+BRK_w = to.weekly(BRK, OHLC = FALSE)
+dates_BRK            = zoo::index(BRK_w)
+```
+
+```{r returns weekly}
+#| echo: false
+#| message: false
+rAAPL = na.omit(diff(AAPL_w))
+dates_AAPL_w = zoo::index(rAAPL)
+
+rMSFT = na.omit(diff(MSFT_w))
+dates_MSFT_w = zoo::index(rMSFT)
+
+rAMZN = na.omit(diff(AMZN_w))
+dates_AMZN_w = zoo::index(rAMZN)
+
+rNVDA = na.omit(diff(NVDA_w))
+dates_NVDA_w = zoo::index(rNVDA)
+
+rBRK = na.omit(diff(BRK_w))
+dates_BRK_w = zoo::index(rBRK)
+```
+
+```{r weekly_realised_volatility}
+#| echo: false
+#| message: false
+# AAPL
+# Daily realised volatility approximated as square of log returns
+AAPL.RVd = na.omit((diff(AAPL))^2)
+# Sum up daily realised volatilities in a week to get weekly realised volatility
+AAPL.RVw = apply.weekly(AAPL.RVd, sum)
+AAPL.Rsdw = sqrt(AAPL.RVw)
+dates_AAPL.Rsdw = zoo::index(AAPL.Rsdw)
+
+# MSFT
+MSFT.RVd = na.omit((diff(MSFT))^2)
+MSFT.RVw = apply.weekly(MSFT.RVd, sum)
+MSFT.Rsdw = sqrt(MSFT.RVw)
+dates_MSFT.Rsdw = zoo::index(MSFT.Rsdw)
+
+# AMZN
+AMZN.RVd = na.omit((diff(AMZN))^2)
+AMZN.RVw = apply.weekly(AMZN.RVd, sum)
+AMZN.Rsdw = sqrt(AMZN.RVw)
+dates_AMZN.Rsdw = zoo::index(AMZN.Rsdw)
+
+# NVDA
+NVDA.RVd = na.omit((diff(NVDA))^2)
+NVDA.RVw = apply.weekly(NVDA.RVd, sum)
+NVDA.Rsdw = sqrt(NVDA.RVw)
+dates_NVDA.Rsdw = zoo::index(NVDA.Rsdw)
+
+# BRK
+BRK.RVd = na.omit((diff(BRK))^2)
+BRK.RVw = apply.weekly(BRK.RVd, sum)
+BRK.Rsdw = sqrt(BRK.RVw)
+dates_BRK.Rsdw = zoo::index(BRK.Rsdw)
+```
+
+## Characterising data
+
+### Dynamics in stock returns
+
+The weekly log returns of the stocks from 5 February 1999 to 5 May 2023 are plotted in the time series below. The time series plot shows that stock returns follow very similar dynamics, hovering around a value close to zero. We also observe volatility clusters, which are times when there are more movements in stock returns, around 2007 to 2008, corresponding to the Global Financial Crisis and around 2020, during the COVID-19 pandemic.
+
+```{r returns_series}
+#| echo: false
+#| message: false
+#| fig-height: 5
+#| fig-width: 12
+par(mar=c(4,4,1,1))
+# plot the time series of stock prices 
+plot(x=dates_AAPL_w, y=as.vector(rAAPL), type="l", bty="n", col=qaf2, lwd=2, main="Log returns from 05/02/1999 to 05/05/2023", ylab="weekly log return of stocks", xlab="dates", ylim=range(rAAPL, rMSFT, rAMZN, rNVDA, rBRK))
+
+lines(x=dates_MSFT_w, y=as.vector(rMSFT), type="l", bty="n", col=qaf3, lwd=2)
+
+lines(x=dates_AMZN_w, y=as.vector(rAMZN), type="l", bty="n", col=qaf4, lwd=2)
+
+lines(x=dates_NVDA_w, y=as.vector(rNVDA), type="l", bty="n", col=qaf5, lwd=2)
+
+lines(x=dates_BRK_w, y=as.vector(rBRK), type="l", bty="n", col=qaf6, lwd=2)
+
+legend("bottomright", legend=c("AAPL","MSFT", "AMZN", "NVDA", "BRK-B"), lwd=c(2,2,2,2,2), col=c(qaf2,qaf3,qaf4,qaf5, qaf6, bty="n"))
+
+
+```
+
+```{r plot_AAPL}
+#| echo: false
+#| message: false
+#| fig-height: 4
+#| fig-width: 10
+#| eval: false
+# stock returns
+plot(x=dates_AAPL_w, y=as.vector(rAAPL), type="l", bty="n", col=qaf2, lwd=2, main="log(AAPL) returns from 05/02/1999 to 05/05/2023", ylab="weekly log return of stocks (%)", xlab="dates", ylim=range(rAAPL, AAPL.Rsdw))
+# sd
+lines(x=dates_AAPL.Rsdw, y=as.vector(AAPL.Rsdw), type="l", bty="n", col=qaf2.shade1, lwd=2)
+# legend
+legend("bottomright", legend=c("weekly AAPL returns","weekly realised standard deviation"), lwd=c(2,2), col=c(qaf2,qaf2.shade1, bty="n"))
+
+```
+
+```{r plot_MSFT}
+#| echo: false
+#| message: false
+#| fig-height: 4
+#| fig-width: 10
+#| eval: false
+# stock returns
+plot(x=dates_MSFT_w, y=as.vector(rMSFT), type="l", bty="n", col=qaf3, lwd=2, main="log(MSFT) returns from 05/02/1999 to 05/05/2023", ylab="weekly log return of stocks (%)", xlab="dates", ylim=range(rMSFT, MSFT.Rsdw))
+# sd
+lines(x=dates_MSFT.Rsdw, y=as.vector(MSFT.Rsdw), type="l", bty="n", col=qaf3.shade1, lwd=2)
+# legend
+legend("bottomright", legend=c("weekly MSFT returns","weekly realised standard deviation"), lwd=c(2,2), col=c(qaf3,qaf3.shade1, bty="n"))
+```
+
+```{r plot_AMZN}
+#| echo: false
+#| message: false
+#| fig-height: 4
+#| fig-width: 10
+#| eval: false
+# stock returns
+plot(x=dates_AMZN_w, y=as.vector(rAMZN), type="l", bty="n", col=qaf4, lwd=2, main="log(AMZN) returns from 05/02/1999 to 05/05/2023", ylab="weekly log return of stocks (%)", xlab="dates", ylim=range(rAMZN, AMZN.Rsdw))
+# sd
+lines(x=dates_AMZN.Rsdw, y=as.vector(AMZN.Rsdw), type="l", bty="n", col=qaf4.shade1, lwd=2)
+# legend
+legend("bottomright", legend=c("weekly AMZN returns","weekly realised standard deviation"), lwd=c(2,2), col=c(qaf4,qaf4.shade1, bty="n"))
+```
+
+```{r plot_NVDA}
+#| echo: false
+#| message: false
+#| fig-height: 4
+#| fig-width: 10
+#| eval: false
+# stock returns
+plot(x=dates_AMZN_w, y=as.vector(rNVDA), type="l", bty="n", col=qaf5, lwd=2, main="log(NVDA) returns from 05/02/1999 to 05/05/2023", ylab="weekly log return of stocks (%)", xlab="dates", ylim=range(rNVDA, NVDA.Rsdw))
+# sd
+lines(x=dates_NVDA.Rsdw, y=as.vector(NVDA.Rsdw), type="l", bty="n", col=qaf5.shade1, lwd=2)
+# legend
+legend("bottomright", legend=c("weekly NVDA returns","weekly realised standard deviation"), lwd=c(2,2), col=c(qaf5,qaf5.shade1, bty="n"))
+```
+
+```{r plot_BRK}
+#| echo: false
+#| message: false
+#| fig-height: 4
+#| fig-width: 10
+#| eval: false
+# stock returns
+plot(x=dates_BRK_w, y=as.vector(rBRK), type="l", bty="n", col=qaf6, lwd=2, main="log(BRK) returns from 05/02/1999 to 05/05/2023", ylab="weekly log return of stocks", xlab="dates", ylim=range(rBRK, BRK.Rsdw))
+# sd
+lines(x=dates_BRK.Rsdw, y=as.vector(BRK.Rsdw), type="l", bty="n", col=qaf6.shade1, lwd=2)
+# legend
+legend("bottomright", legend=c("weekly BRK returns","weekly realised standard deviation"), lwd=c(2,2), col=c(qaf6,qaf6.shade1, bty="n"))
+```
+
+The autocorrelograms below show that there is very little memory in weekly log returns. Except for the first lag of log(BRK-B), all the autocorrelations are between -0.1 and 0.1 even when statistically significant. This suggests that it is insufficient to only use autoregressive lags of stock returns to explain future returns. As shown in the table below, aside for AAPL, for all stocks an autoregressive (AR) model (with the lowest AIC) is insufficient to capture the dynamics in stock returns, as shown by the evidence of autocorrelated and heteroskedastic residuals at the 5% level of significance. We will address this using a GARCH model.
+
+```{r AR model selection for forecasting}
+#| echo: false
+#| message: false
+#| results: hide
+# First need to choose the appropriate AR model and report residual diagnostics.  
+ar(rAAPL, aic=TRUE, order.max=10, method = "ols")
+AAPL.ar     = ar(rAAPL, order.max=10, aic=FALSE, method="ols")
+AAPL.lb     = AutocorTest(as.vector(AAPL.ar$resid), lag=30, type="Ljung-Box")
+# ARCH LM test for heteroskedasticity
+AAPL.arch   = ArchTest(na.omit(AAPL.ar$resid), lags=30)
+
+ar(rMSFT, aic=TRUE, order.max=10, method = "ols")
+MSFT.ar     = ar(MSFT, order.max=7, aic=FALSE, method="ols")
+MSFT.lb     = AutocorTest(MSFT.ar$resid, lag=30, type="Ljung-Box")
+# ARCH LM test for heteroskedasticity
+MSFT.arch   = ArchTest(na.omit(MSFT.ar$resid), lags=30)
+
+
+ar(rAMZN, aic=TRUE, order.max=10, method = "ols")
+AMZN.ar     = ar(rAMZN, order.max=9, aic=FALSE, method="ols")
+AMZN.lb     = AutocorTest(AMZN.ar$resid, lag=30, type="Ljung-Box")
+# ARCH LM test for heteroskedasticity
+AMZN.arch   = ArchTest(na.omit(AMZN.ar$resid), lags=30)
+
+
+ar(rNVDA, aic=TRUE, order.max=10, method = "ols")
+NVDA.ar     = ar(rNVDA, order.max=1, aic=FALSE, method="ols")
+NVDA.lb     = AutocorTest(NVDA.ar$resid, lag=30, type="Ljung-Box")
+# ARCH LM test for heteroskedasticity
+NVDA.arch   = ArchTest(na.omit(NVDA.ar$resid), lags=30)
+
+
+ar(rBRK, aic=TRUE, order.max=10, method = "ols")
+BRK.ar     = ar(BRK, order.max=8, aic=FALSE, method="ols")
+BRK.lb     = AutocorTest(BRK.ar$resid, lag=30, type="Ljung-Box")
+# ARCH LM test for heteroskedasticity
+BRK.arch   = ArchTest(na.omit(BRK.ar$resid), lags=30)
+
+round(matrix(c(
+               AAPL.lb$statistic, MSFT.lb$statistic, AMZN.lb$statistic, NVDA.lb$statistic, BRK.lb$statistic, 
+               AAPL.lb$p.value, MSFT.lb$p.value, AMZN.lb$p.value, NVDA.lb$p.value, BRK.lb$p.value, 
+               AAPL.arch$statistic, MSFT.arch$statistic, AMZN.arch$statistic, NVDA.arch$statistic, BRK.arch$statistic, 
+               AAPL.arch$p.value, MSFT.arch$p.value, AMZN.arch$p.value, NVDA.arch$p.value, BRK.arch$p.value
+               ),
+             ncol = 5, byrow = TRUE), 3)
+```
+
+```{r autocorrelation_returns}
+#| echo: false
+#| message: false
+#| fig-height: 2.25
+#| fig-width: 8
+# calculate autocorrelation in our data
+AAPL.acf   = acf(as.vector(rAAPL),lag.max=20,plot=FALSE)
+MSFT.acf  = acf(as.vector(rMSFT),lag.max=20,plot=FALSE)
+AMZN.acf     = acf(as.vector(rAMZN),lag.max=20,plot=FALSE)
+NVDA.acf  = acf(as.vector(rNVDA),lag.max=20,plot=FALSE)
+BRK.acf  = acf(as.vector(rBRK),lag.max=20,plot=FALSE)
+
+# plot autocorrelation of returns
+par(mfrow=c(1,3))
+plot(AAPL.acf, main="log(AAPL) weekly returns", xlab="lag",ylab="acf")
+plot(MSFT.acf, main="log(MSFT) weekly returns", xlab="lag",ylab="acf")
+plot(AMZN.acf, main="log(AMZN) weekly returns", xlab="lag",ylab="acf")
+
+par(mfrow=c(1,3))
+plot(NVDA.acf, main="log(NVDA) weekly returns", xlab="lag",ylab="acf")
+plot(BRK.acf, main="log(BRK-B) weekly returns", xlab="lag",ylab="acf")
+
+```
+
++----------+--------+---------+---------+---------+---------+
+|          | AAPL:  | MSFT:   | AMZN:   | NVDA:   | BRK-B:  |
+|          |        |         |         |         |         |
+|          | AR(10) | AR(7)   | AR(9)   | AR(1)   | AR(8)   |
++:========:+:======:+:=======:+:=======:+:=======:+:=======:+
+| Q(30)    | 27.570 | 50.271  | 63.503  | 47.611  | 71.823  |
++----------+--------+---------+---------+---------+---------+
+| p-value  | 0.593  | 0.012   | 0.000   | 0.022   | 0.000   |
++----------+--------+---------+---------+---------+---------+
+| ARCH(30) | 18.620 | 663.743 | 252.706 | 143.625 | 889.604 |
++----------+--------+---------+---------+---------+---------+
+| p-value  | 0.948  | 0.000   | 0.000   | 0.000   | 0.000   |
++----------+--------+---------+---------+---------+---------+
+
+In addition, all the stocks' returns exhibit leptokurtosis as they have kurtosis higher than 3. This means that there more extreme outliers in the data than a normal distribution. We will consider whether extending our models with student-t distributed errors can better capture this phenomena and improve forecasting performance in our subsequent analysis.
+
+|          |  AAPL  | MSFT  |  AMZN  |  NVDA  | BRK-B  |
+|:--------:|:------:|:-----:|:------:|:------:|:------:|
+| kurtosis | 26.489 | 6.676 | 10.281 | 10.173 | 10.066 |
+
+```{r leptokurtosis}
+#| echo: false
+#| message: false
+#| output: false
+library(moments)
+kurtosis(rAAPL)
+kurtosis(rMSFT)
+kurtosis(rAMZN)
+kurtosis(rNVDA)
+kurtosis(rBRK)
+```
+
+### Dynamics in stock returns realised volatility
+
+Next, we construct the weekly realised volatility of the stocks. As intra-daily data is unavailable, daily realised volatility is estimated as the squared daily log-return. Daily realised volatility is summed over the week to obtain weekly realised volatility. These are plotted in the time series below. Realised volatility seems to capture the dynamics in weekly log returns quite well, exhibiting spikes in periods of volatility cluster in stock returns:
+
+```{r volatility_series}
+#| echo: false
+#| message: false
+#| fig-height: 5
+#| fig-width: 12
+par(mar=c(4,4,1,1))
+# plot the time series of stock return volatility 
+plot(x=dates_AAPL.Rsdw, y=as.vector(AAPL.Rsdw), type="l", bty="n", col=qaf2, lwd=2, main="Realised volatility from 05/02/1999 to 05/05/2023", ylab="weekly realised volatility of stocks", xlab="dates", ylim=range(AAPL.Rsdw, MSFT.Rsdw, AMZN.Rsdw, NVDA.Rsdw, BRK.Rsdw))
+
+lines(x=dates_MSFT.Rsdw, y=as.vector(MSFT.Rsdw), type="l", bty="n", col=qaf3, lwd=2)
+
+lines(x=dates_AMZN.Rsdw, y=as.vector(AMZN.Rsdw), type="l", bty="n", col=qaf4, lwd=2)
+
+lines(x=dates_NVDA.Rsdw, y=as.vector(NVDA.Rsdw), type="l", bty="n", col=qaf5, lwd=2)
+
+lines(x=dates_BRK.Rsdw, y=as.vector(BRK.Rsdw), type="l", bty="n", col=qaf6, lwd=2)
+
+legend("topright", legend=c("AAPL","MSFT", "AMZN", "NVDA", "BRK-B"), lwd=c(2,2,2,2,2), col=c(qaf2,qaf3,qaf4,qaf5, qaf6, bty="n"))
+```
+
+The autocorrelograms below show the autocorrelation between weekly realised volatility and its lags. Except for log(AAPL), the autocorrelations in weekly realised volatility are all statistically significant up to the 20th lag. In general, they start from around 0.3 to 0.4 and decay to around 0.1 to 0.2 over time. This suggests that it is feasible to use past information on volatility to forecast future volatility.
+
+```{r autocorrelation_vol}
+#| echo: false
+#| message: false
+#| fig-height: 2.25
+#| fig-width: 8
+# plot autocorrelation of volatility 
+AAPL2.acf = acf(as.vector(AAPL.RVw),lag.max=20, plot=FALSE)
+MSFT2.acf = acf(as.vector(MSFT.RVw),lag.max=20, plot=FALSE)
+AMZN2.acf = acf(as.vector(AMZN.RVw),lag.max=20, plot=FALSE)
+NVDA2.acf = acf(as.vector(NVDA.RVw),lag.max=20, plot=FALSE)
+BRK2.acf = acf(as.vector(BRK.RVw),lag.max=20, plot=FALSE)
+
+par(mfrow=c(1,3))
+plot(AAPL2.acf, main="log(AAPL) weekly realised volatility", xlab="lag",ylab="acf")
+plot(MSFT2.acf, main="log(MSFT) weekly realised volatility", xlab="lag",ylab="acf")
+plot(AMZN2.acf, main="log(AMZN) weekly realised volatility", xlab="lag",ylab="acf")
+
+par(mfrow=c(1,3))
+plot(NVDA2.acf, main="log(NVDA) weekly realised volatility", xlab="lag",ylab="acf")
+plot(BRK2.acf, main="log(BRK-B) weekly realised volatility", xlab="lag",ylab="acf")
+```
+
+### 
+
+### Augmented Dickey Fuller Test for Unit Root Stationarity
+
+The table below shows the results of the Augmented Dickey Fuller test on the weekly log returns of the stocks. The results show that the returns of the stocks are integrated of order 0 and unit root stationary, since the null hypothesis of unit root non stationarity is rejected without any additional differentiation.
+
+```{r ADF}
+#| echo: false
+#| message: false
+#| warning: false
+#| results: hide
+library(fUnitRoots)
+# AAPL
+ar(rAAPL, aic=TRUE, order.max =10, method="ols")
+AAPL.ar    = ar(rAAPL, order.max=10, aic=FALSE, method="ols")
+AutocorTest(as.vector(AAPL.ar$resid), lag=30, type="Ljung-Box")
+adf.AAPL.ct   = adfTest(rAAPL, lags=10, type="c")
+
+# MSFT
+ar(rMSFT, aic=TRUE, method="ols")
+MSFT.ar = ar(rMSFT, order.max=7, aic=FALSE, method="ols")
+AutocorTest(as.vector(MSFT.ar$resid), lag=30, type="Ljung-Box")
+adf.MSFT.ct   = adfTest(rMSFT, lags=7, type="c")
+
+# AMZN
+ar(rAMZN, aic=TRUE, order.max=10, method="ols")
+AMZN.ar    = ar(AMZN, order.max=1, aic=FALSE, method="ols")
+AutocorTest(as.vector(AMZN.ar$resid), lag=30, type="Ljung-Box")
+adf.AMZN.ct   = adfTest(rAMZN, lags=9, type="c")
+
+
+# NVDA
+ar(rNVDA, aic=TRUE, method="ols")
+NVDA.ar    = ar(NVDA, order.max=30, aic=FALSE, method="ols")
+AutocorTest(as.vector(NVDA.ar$resid), lag=30, type="Ljung-Box")
+adf.NVDA.ct   = adfTest(rNVDA, lags=1, type="c")
+
+
+# BRK
+ar(rBRK, aic=TRUE, order.max=10, method="ols")
+BRK.ar    = ar(BRK, order.max=16, aic=FALSE, method="ols")
+AutocorTest(as.vector(BRK.ar$resid), lag=30, type="Ljung-Box")
+adf.BRK.ct   = adfTest(rBRK, lags=8, type="c")
+
+
+# ADF test for data
+round(matrix(c(adf.AAPL.ct@test$statistic, adf.AAPL.ct@test$p.value,
+               adf.MSFT.ct@test$statistic, adf.MSFT.ct@test$p.value,
+               adf.AMZN.ct@test$statistic, adf.AMZN.ct@test$p.value,
+               adf.NVDA.ct@test$statistic, adf.NVDA.ct@test$p.value,
+               adf.BRK.ct@test$statistic, adf.BRK.ct@test$p.value), 
+             ncol = 2, byrow = TRUE), 3)
+```
+
++--------------------+---------------------+-------------+--------------------+-------------+
+| Series             | Deterministic Terms | Lag Order   | ADF Test Statistic | p-value     |
++:==================:+:===================:+:===========:+:==================:+:===========:+
+| $\Delta$log(AAPL)  | constant            | 10          | -9.199             | 0.01        |
++--------------------+---------------------+-------------+--------------------+-------------+
+| $\Delta$log(MSFT)  | constant            | 7           | -14.270            | 0.01        |
++--------------------+---------------------+-------------+--------------------+-------------+
+| $\Delta$log(AMZN)  | constant            | 9           | -12.113            | 0.01        |
++--------------------+---------------------+-------------+--------------------+-------------+
+| $\Delta$log(NVDA)  | constant            | 1           | -26.079            | 0.01        |
++--------------------+---------------------+-------------+--------------------+-------------+
+| $\Delta$log(BRK-B) | constant            | 8           | -12.894            | 0.01        |
++--------------------+---------------------+-------------+--------------------+-------------+
+
+## Model selection for GARCH
+
+### 1) AIC
+
+In group project 1, we attempt to forecast returns using an autoregressive model. Such models attempts to explain a stock's current returns using past returns. However, as shown previously, these models are insufficient to capture the dynamics in returns, as evidenced by the autocorrelated and heteroskedastic residuals. This suggests biased and inefficient estimates.
+
+To address this, the models can be extended by a GARCH specification that allows dynamics to be introduced into the conditional variance process. The GARCH specification is as follows.
+
+```{=tex}
+\vspace{-20pt} 
+\begin{align} 
+y_t &= \mu_t + u_t\\ 
+h_t &= \omega + \alpha u_{t-1}^2 + \beta h_{t-1}\end{align}
+```
+This can even be used to forecast future volatility of a stock. Furthermore, the GARCH equation also allows us to model risk premium by including a volatility term in the conditional mean equation. The intuition of this extension is that if an asset is more risky, then there should be higher compensation associated with such assets in the form of higher expected returns.
+
+```{=tex}
+\vspace{-20pt} 
+\begin{align} 
+y_t &= \mu_t + \phi \sqrt{h_t} + u_t\\ 
+h_t &= \omega + \alpha u_{t-1}^2 + \beta h_{t-1}\end{align}
+```
+It is also possible to extend the GARCH equation with a leverage effect:
+
+```{=tex}
+\vspace{-20pt} 
+\begin{align} 
+y_t &= \mu_t + u_t\\ 
+h_t &= \omega + \alpha u_{t-1}^2 + \gamma \mathcal{I_{t-1}} u_{t-1}^2 + \beta h_{t-1}\\
+\mathcal{I_{t-1}} &= 1 \ \textbf{if} \ u_{t-1} <0\\
+\mathcal{I_{t-1}} &= 0 \ \textbf{if} \ u_{t-1} \ge 0\end{align}
+```
+where $\mathcal{I_{t-1}}$ is an indicator for negative $u_{t-1}$. This aims to capture the phenomena that investors seem to respond more to negative news about a company, leading to larger changes in conditional volatility of a stock.
+
+In the following section, we compute the AIC of various GARCH(1,1) models, with AR lag orders up to 10. We only test for lag orders up to 10 as there is low autocorrelation in returns as illustrated previously. It is not expected that returns from more than 10 weeks ago to be informative in explaining current returns. This process aims to find models that balances the trade-off between model fit and complexity best. The lag orders that minimises AIC are summarised in the table below:
+
++------------+------------+----------------+--------------------+------------------------+
+|            | GARCH(1,1) | GJR-GARCH(1,1) | GARCH In Mean(1,1) | GJR-GARCH In Mean(1,1) |
++:==========:+:==========:+:==============:+:==================:+:======================:+
+| AAPL AR    | 1          | 3              | 1                  | 3                      |
++------------+------------+----------------+--------------------+------------------------+
+| AIC        | -3.148761  | -3.150897      | -3.147815          | -3.149573              |
++------------+------------+----------------+--------------------+------------------------+
+| MSFT AR    | 1          | 1              | 1                  | 1                      |
++------------+------------+----------------+--------------------+------------------------+
+| AIC        | -3.794138  | -3.796905      | -3.793255          | -3.795661              |
++------------+------------+----------------+--------------------+------------------------+
+| AMZN AR    | 1          | 1              | 1                  | 1                      |
++------------+------------+----------------+--------------------+------------------------+
+| AIC        | -2.858779  | -2.870332      | -2.857359          | -2.869019              |
++------------+------------+----------------+--------------------+------------------------+
+| NVDA AR    | 1          | 1              | 1                  | 1                      |
++------------+------------+----------------+--------------------+------------------------+
+| AIC        | -2.400419  | -2.410735      | -2.399118          | -2.40917               |
++------------+------------+----------------+--------------------+------------------------+
+| BRK-B AR   | 1          | 1              | 1                  | 1                      |
++------------+------------+----------------+--------------------+------------------------+
+| AIC        | -4.362841  | -4.374425      | -4.361265          | -4.372846              |
++------------+------------+----------------+--------------------+------------------------+
+
+The optimal AR order for all models are between 1 and 3, highlighting that adding more lag terms of returns does not improve the model's fit to the data. If selecting based on lowest AIC, GJR-GARCH(1,1) is the preferred specification for all stocks, with the GJR-GARCH In Mean(1,1) being the second best. However, the AIC considers in sample performance, while we want to use these models to forecast future returns or volatility. Hence, the key aspect to consider is the forecasting performance of these models. This can be measured using the root mean square forecast error (RMSFE).
+
+```{r AIC_GARCH_AAPL}
+#| echo: false
+#| message: false
+#| output: false
+#| eval: false
+pmax = 10
+## AAPL
+#sGARCH
+AIC_AAPL_s           = rep(NA, pmax)
+for (p in 1:pmax){
+  model.specification     = ugarchspec(mean.model = list(armaOrder=c(p, 0), include.mean = TRUE), 
+                                       variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "norm")
+  model.estimation        = ugarchfit(spec=model.specification, data=rAAPL, solver = "solnp")
+  AIC_AAPL_s[p]    = infocriteria(model.estimation)[1]
+}
+AIC_AAPL_s
+min(AIC_AAPL_s)
+(1:pmax)[which.min(AIC_AAPL_s)]
+##########################################################################
+# gjrGARCH 
+AIC_AAPL_gjr           = rep(NA, pmax)
+for (p in 1:pmax){
+  model.specification     = ugarchspec(mean.model = list(armaOrder=c(p, 0), include.mean = TRUE), 
+                                       variance.model = list(model = "gjrGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "norm")
+  model.estimation        = ugarchfit(spec=model.specification, data=rAAPL, solver = "solnp")
+  AIC_AAPL_gjr[p]    = infocriteria(model.estimation)[1]
+}
+min(AIC_AAPL_gjr)
+(1:pmax)[which.min(AIC_AAPL_gjr)]
+##########################################################################
+#GARCHim 
+AIC_AAPL_im           = rep(NA, pmax)
+for (p in 1:pmax){
+  model.specification     = ugarchspec(mean.model = list(armaOrder=c(p, 0), include.mean = TRUE, archm = TRUE), 
+                                       variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "norm")
+  model.estimation        = ugarchfit(spec=model.specification, data=rAAPL, solver = "solnp", )
+  AIC_AAPL_im[p]    = infocriteria(model.estimation)[1]
+}
+min(AIC_AAPL_im)
+(1:pmax)[which.min(AIC_AAPL_im)]
+##############################################################
+# gjrGARCH in mean
+AIC_AAPL_gjrim           = rep(NA, pmax+1)
+for (p in 0:pmax){
+  model.specification     = ugarchspec(mean.model = list(armaOrder=c(p, 0), include.mean = TRUE, archm = TRUE), 
+                                       variance.model = list(model = "gjrGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "norm")
+  model.estimation        = ugarchfit(spec=model.specification, data=rAAPL, solver = "solnp")
+  AIC_AAPL_gjrim[p+1]    = infocriteria(model.estimation)[1]
+}
+min(AIC_AAPL_gjrim)
+(0:pmax)[which.min(AIC_AAPL_gjrim)]
+##############################################################
+
+```
+
+```{r AIC_GARCH_MSFT}
+#| echo: false
+#| message: false
+#| output: false
+#| eval: false
+pmax = 10
+## MSFT
+#sGARCH
+AIC_MSFT_s           = rep(NA, pmax+1)
+for (p in 0:pmax){
+  model.specification     = ugarchspec(mean.model = list(armaOrder=c(p, 0), include.mean = TRUE), 
+                                       variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "norm")
+  model.estimation        = ugarchfit(spec=model.specification, data=rMSFT, solver = "solnp")
+  AIC_MSFT_s[p+1]    = infocriteria(model.estimation)[1]
+}
+AIC_MSFT_s
+min(AIC_MSFT_s)
+(0:pmax)[which.min(AIC_MSFT_s)]
+##########################################################################
+# gjrGARCH 
+AIC_MSFT_gjr           = rep(NA, pmax+1)
+for (p in 0:pmax){
+  model.specification     = ugarchspec(mean.model = list(armaOrder=c(p, 0), include.mean = TRUE), 
+                                       variance.model = list(model = "gjrGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "norm")
+  model.estimation        = ugarchfit(spec=model.specification, data=rMSFT, solver = "solnp")
+  AIC_MSFT_gjr[p+1]    = infocriteria(model.estimation)[1]
+}
+min(AIC_MSFT_gjr)
+(0:pmax)[which.min(AIC_MSFT_gjr)]
+##########################################################################
+#GARCHim 
+AIC_MSFT_im           = rep(NA, pmax+1)
+for (p in 0:pmax){
+  model.specification     = ugarchspec(mean.model = list(armaOrder=c(p, 0), include.mean = TRUE, archm = TRUE), 
+                                       variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "norm")
+  model.estimation        = ugarchfit(spec=model.specification, data=rMSFT, solver = "solnp", )
+  AIC_MSFT_im[p+1]    = infocriteria(model.estimation)[1]
+}
+min(AIC_MSFT_im)
+(0:pmax)[which.min(AIC_MSFT_im)]
+###################################################################################
+# gjrGARCH in mean
+AIC_MSFT_gjrim           = rep(NA, pmax+1)
+for (p in 0:pmax){
+  model.specification     = ugarchspec(mean.model = list(armaOrder=c(p, 0), include.mean = TRUE, archm = TRUE), 
+                                       variance.model = list(model = "gjrGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "norm")
+  model.estimation        = ugarchfit(spec=model.specification, data=rMSFT, solver = "solnp")
+  AIC_MSFT_gjrim[p+1]    = infocriteria(model.estimation)[1]
+}
+min(AIC_MSFT_gjrim)
+(0:pmax)[which.min(AIC_MSFT_gjrim)]
+#########################################################################
+```
+
+```{r AIC_GARCH_AMZN}
+#| echo: false
+#| message: false
+#| output: false
+#| eval: false
+pmax = 10
+## AMZN
+#sGARCH
+AIC_AMZN_s           = rep(NA, pmax)
+for (p in 1:pmax){
+  model.specification     = ugarchspec(mean.model = list(armaOrder=c(p, 0), include.mean = TRUE), 
+                                       variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "norm")
+  model.estimation        = ugarchfit(spec=model.specification, data=rAMZN, solver = "solnp")
+  AIC_AMZN_s[p]    = infocriteria(model.estimation)[1]
+}
+AIC_AMZN_s
+min(AIC_AMZN_s)
+(1:pmax)[which.min(AIC_AMZN_s)]
+##########################################################################
+# gjrGARCH 
+AIC_AMZN_gjr           = rep(NA, pmax)
+for (p in 1:pmax){
+  model.specification     = ugarchspec(mean.model = list(armaOrder=c(p, 0), include.mean = TRUE), 
+                                       variance.model = list(model = "gjrGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "norm")
+  model.estimation        = ugarchfit(spec=model.specification, data=rAMZN, solver = "solnp")
+  AIC_AMZN_gjr[p]    = infocriteria(model.estimation)[1]
+}
+min(AIC_AMZN_gjr)
+(1:pmax)[which.min(AIC_AMZN_gjr)]
+##########################################################################
+#GARCHim 
+AIC_AMZN_im           = rep(NA, pmax)
+for (p in 1:pmax){
+  model.specification     = ugarchspec(mean.model = list(armaOrder=c(p, 0), include.mean = TRUE, archm = TRUE), 
+                                       variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "norm")
+  model.estimation        = ugarchfit(spec=model.specification, data=rAMZN, solver = "solnp", )
+  AIC_AMZN_im[p]    = infocriteria(model.estimation)[1]
+}
+min(AIC_AMZN_im)
+(1:pmax)[which.min(AIC_AMZN_im)]
+###################################################################################
+# gjrGARCH in mean
+AIC_AMZN_gjrim           = rep(NA, pmax)
+for (p in 1:pmax){
+  model.specification     = ugarchspec(mean.model = list(armaOrder=c(p, 0), include.mean = TRUE, archm = TRUE), 
+                                       variance.model = list(model = "gjrGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "norm")
+  model.estimation        = ugarchfit(spec=model.specification, data=rAMZN, solver = "solnp")
+  AIC_AMZN_gjrim[p]    = infocriteria(model.estimation)[1]
+}
+min(AIC_AMZN_gjrim)
+(1:pmax)[which.min(AIC_AMZN_gjrim)]
+###################################################################################
+```
+
+```{r AIC_GARCH_NVDA}
+#| echo: false
+#| message: false
+#| output: false
+#| eval: false
+pmax = 10
+## NVDA
+#sGARCH
+AIC_NVDA_s           = rep(NA, pmax)
+for (p in 1:pmax){
+  model.specification     = ugarchspec(mean.model = list(armaOrder=c(p, 0), include.mean = TRUE), 
+                                       variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "norm")
+  model.estimation        = ugarchfit(spec=model.specification, data=rNVDA, solver = "solnp")
+  AIC_NVDA_s[p]    = infocriteria(model.estimation)[1]
+}
+AIC_NVDA_s
+min(AIC_NVDA_s)
+(1:pmax)[which.min(AIC_NVDA_s)]
+##########################################################################
+# gjrGARCH 
+AIC_NVDA_gjr           = rep(NA, pmax)
+for (p in 1:pmax){
+  model.specification     = ugarchspec(mean.model = list(armaOrder=c(p, 0), include.mean = TRUE), 
+                                       variance.model = list(model = "gjrGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "norm")
+  model.estimation        = ugarchfit(spec=model.specification, data=rNVDA, solver = "solnp")
+  AIC_NVDA_gjr[p]    = infocriteria(model.estimation)[1]
+}
+min(AIC_NVDA_gjr)
+(1:pmax)[which.min(AIC_NVDA_gjr)]
+##########################################################################
+#GARCHim 
+AIC_NVDA_im           = rep(NA, pmax)
+for (p in 1:pmax){
+  model.specification     = ugarchspec(mean.model = list(armaOrder=c(p, 0), include.mean = TRUE, archm = TRUE), 
+                                       variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "norm")
+  model.estimation        = ugarchfit(spec=model.specification, data=rNVDA, solver = "solnp", )
+  AIC_NVDA_im[p]    = infocriteria(model.estimation)[1]
+}
+min(AIC_NVDA_im)
+(1:pmax)[which.min(AIC_NVDA_im)]
+###################################################################################
+# gjrGARCH in mean
+AIC_NVDA_gjrim           = rep(NA, pmax)
+for (p in 1:pmax){
+  model.specification     = ugarchspec(mean.model = list(armaOrder=c(p, 0), include.mean = TRUE, archm = TRUE), 
+                                       variance.model = list(model = "gjrGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "norm")
+  model.estimation        = ugarchfit(spec=model.specification, data=rNVDA, solver = "solnp")
+  AIC_NVDA_gjrim[p]    = infocriteria(model.estimation)[1]
+}
+min(AIC_NVDA_gjrim)
+(1:pmax)[which.min(AIC_NVDA_gjrim)]
+###################################################################################
+```
+
+```{r AIC_GARCH_BRK}
+#| echo: false
+#| message: false
+#| output: false
+#| eval: false
+pmax = 10
+## BRK
+#sGARCH
+AIC_BRK_s           = rep(NA, pmax+1)
+for (p in 0:pmax){
+  model.specification     = ugarchspec(mean.model = list(armaOrder=c(p, 0), include.mean = TRUE), 
+                                       variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "norm")
+  model.estimation        = ugarchfit(spec=model.specification, data=rBRK, solver = "solnp")
+  AIC_BRK_s[p+1]    = infocriteria(model.estimation)[1]
+}
+AIC_BRK_s
+min(AIC_BRK_s)
+(0:pmax)[which.min(AIC_BRK_s)]
+##########################################################################
+# gjrGARCH 
+AIC_BRK_gjr           = rep(NA, pmax+1)
+for (p in 0:pmax){
+  model.specification     = ugarchspec(mean.model = list(armaOrder=c(p, 0), include.mean = TRUE), 
+                                       variance.model = list(model = "gjrGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "norm")
+  model.estimation        = ugarchfit(spec=model.specification, data=rBRK, solver = "solnp")
+  AIC_BRK_gjr[p+1]    = infocriteria(model.estimation)[1]
+}
+min(AIC_BRK_gjr)
+(0:pmax)[which.min(AIC_BRK_gjr)]
+##########################################################################
+#GARCHim 
+AIC_BRK_im           = rep(NA, pmax+1)
+for (p in 0:pmax){
+  model.specification     = ugarchspec(mean.model = list(armaOrder=c(p, 0), include.mean = TRUE, archm = TRUE), 
+                                       variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "norm")
+  model.estimation        = ugarchfit(spec=model.specification, data=rBRK, solver = "solnp", )
+  AIC_BRK_im[p+1]    = infocriteria(model.estimation)[1]
+}
+min(AIC_BRK_im)
+(0:pmax)[which.min(AIC_BRK_im)]
+###################################################################################
+# gjrGARCH in mean
+AIC_BRK_gjrim           = rep(NA, pmax+1)
+for (p in 0:pmax){
+  model.specification     = ugarchspec(mean.model = list(armaOrder=c(p, 0), include.mean = TRUE, archm = TRUE), 
+                                       variance.model = list(model = "gjrGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "norm")
+  model.estimation        = ugarchfit(spec=model.specification, data=rBRK, solver = "solnp")
+  AIC_BRK_gjrim[p+1]    = infocriteria(model.estimation)[1]
+}
+min(AIC_BRK_gjrim)
+(0:pmax)[which.min(AIC_BRK_gjrim)]
+##############################################################
+```
+
+### 2) Ex-post forecasting
+
+To conduct ex-post forecasting, a data splitting strategy is implemented. The final 26 weeks of data will serve as a test set for verifying predictions, while the remaining data serves as a training set for fitting the model. The estimated model is used to generate forecasts for the final 26 weeks of the data set. The predicted values from this period are then compared to the true values in the test set. This comparison was aimed at identifying the model with superior pseudo-out-of-sample forecasting performance. Through this process, we can compute the RMSFE as follows:
+
+```{=tex}
+\vspace{-20pt} 
+\begin{align} 
+RMSFE = \sqrt{\frac{1}{H}\sum_{h=1}^{H} (y_{T+h} - \hat{y_{T+h}})^2}
+\end{align}
+```
+where H is the number of test data, $y_{T+h}$ is the test data, and $\hat{y_{T+h}}$ is the forecasted value. The RMSFE was used because it squares errors before taking the average. As such, it penalizes large deviations from the actual data more heavily. This is a useful metric when the forecasting is conducted to inform investment strategies as large deviations of the forecasted value from the realised value is undesirable. As RMSFE is a summary statistic of the forecast errors, the lower it is, the better. The RMSFE of the forecasted returns are not reported as they are all very similar. The RMSFE of the variances forecasted using the different GARCH models (with AR order selected by AIC from the previous section) are reported in the table below:
+
++------------+-----------------+------------------+--------------------+------------------------+
+|            | GARCH(1,1)      | GJR-GARCH(1,1)   | GARCH In Mean(1,1) | GJR-GARCH In Mean(1,1) |
++:==========:+:===============:+:================:+:==================:+:======================:+
+| AAPL       | **0.003877797** | 0.004599601      | 0.003996237        | 0.004709404            |
++------------+-----------------+------------------+--------------------+------------------------+
+| MSFT       | 0.001858921     | **0.001845895**  | 0.001861164        | 0.001848369            |
++------------+-----------------+------------------+--------------------+------------------------+
+| AMZN       | 0.00428694      | 0.004782109      | **0.004280142**    | 0.004815302            |
++------------+-----------------+------------------+--------------------+------------------------+
+| NVDA       | **0.005437715** | 0.00552645       | 0.00544194         | 0.005523445            |
++------------+-----------------+------------------+--------------------+------------------------+
+| BRK-B      | 0.0007595879    | **0.0007531076** | 0.0007597153       | 0.0007551436           |
++------------+-----------------+------------------+--------------------+------------------------+
+
+The results are different from that of AIC. Based on RMSFE, GARCH(1,1) is the preferred specification for log(AAPL) and log(NVDA), GJR-GARCH(1,1) is preferred for log(MSFT) and log(BRK-B), and GARCH In Mean(1,1) is preferred for log(AMZN).
+
+In addition, as there is leptokurtosis in the data, a possible extension is to assume the residuals of the model follow a student-t distribution, which facilitates leptokurtic predictive densities with fat tails. This allows the model to capture outlying observations better. The RMSFE of GARCH models with student-t distributed residuals are shown below:
+
++------------+-----------------+-----------------+--------------------+------------------------+
+|            | GARCH(1,1)      | GJR-GARCH(1,1)  | GARCH In Mean(1,1) | GJR-GARCH In Mean(1,1) |
++:==========:+:===============:+:===============:+:==================:+:======================:+
+| AAPL       | 0.002091565     | 0.002214689     | **0.002086432**    | 0.00220598             |
++------------+-----------------+-----------------+--------------------+------------------------+
+| MSFT       | 0.00187216      | 0.001875731     | **0.001870118**    | 0.001877646            |
++------------+-----------------+-----------------+--------------------+------------------------+
+| AMZN       | 0.004610733     | 0.005423633     | **0.004590813**    | 0.005465713            |
++------------+-----------------+-----------------+--------------------+------------------------+
+| NVDA       | **0.005236329** | 0.005289971     | 0.005241418        | 0.005277876            |
++------------+-----------------+-----------------+--------------------+------------------------+
+| BRK-B      | 0.0008810546    | **0.000867136** | 0.0008771141       | 0.0008749249           |
++------------+-----------------+-----------------+--------------------+------------------------+
+
+Models with the lowest RMSFE are highlighted. Student-t distributed errors improves the forecasting performance for log(AAPL) and log(NVDA), as represented by the lower RMSFE.
+
+GARCH variations of order (1,1) are generally deemed adequate. However, a more comprehensive analysis will be conducted to further identify the optimal GARCH model. The selection process involves assessing models with AR orders ranging from 0 to 3, and GARCH(p, q) orders with p and q values from 1 to 3 across the four different GARCH model variations. These models are put through the same evaluation process, with the best performing model for each stock summarised in the table below:
+
+| Stock |     Selected Model     |    AIC    |    RMSFE     |
+|:-----:|:----------------------:|:---------:|:------------:|
+| AAPL  | AR(1)- GJR-GARCH(3,1)  | -3.177290 | 0.001375068  |
+| MSFT  | AR(1) - GJR-GARCH(1,1) | -3.796910 | 0.001845895  |
+| AMZN  | AR(1) - GJR-GARCH(1,1) | -2.870332 | 0.004815302  |
+| NVDA  | AR(1) - GJR-GARCH(2,2) | -2.412683 | 0.005515004  |
+| BRK-B | AR(1) - GJR-GARCH(3,3) | -4.374763 | 0.0007666859 |
+
+The models above are then estimated with student-t distributed errors and compared using RMSFE. Comparing all the RMSFE, the final models with the lowest RMSFE are selected and summarised in the table below:
+
++------------+----------------------------------------------------+--------------+
+| **Stock**  | **Selected Model**                                 | **RMSFE**    |
++============+:==================================================:+==============+
+| AAPL       | AR(1)- GJR-GARCH(3,1), student-t distribution      | 0.001343941  |
++------------+----------------------------------------------------+--------------+
+| MSFT       | AR(1) - GJR-GARCH(1,1)                             | 0.001845895  |
++------------+----------------------------------------------------+--------------+
+| AMZN       | AR(1) - GARCH-In Mean(1,1)                         | 0.004280142  |
++------------+----------------------------------------------------+--------------+
+| NVDA       | AR(1) - GARCH-In Mean(1,1), student-t distribution | 0.005236329  |
++------------+----------------------------------------------------+--------------+
+| BRKB       | AR(1) - GJR-GARCH(1,1)                             | 0.0007531076 |
++------------+----------------------------------------------------+--------------+
+
+```{r Determine_best_GARCH}
+#| echo: false
+#| message: false
+#| warning: false
+#| output: false
+#| eval: false
+# The following code is supposed to identify the best p and r&s order simultaneously for s GARCH models without a mean
+#AAPLret
+p_range = 0:2
+AIC_matrix = array(NA, dim = c(length(p_range), 3, 3))
+
+for (p in p_range) {
+  for (r in 1:3){
+    for (s in 1:3){
+      garch_m_spec = ugarchspec(mean.model = list(armaOrder = c(p, 0), include.mean = TRUE),
+                                 variance.model = list(model = "sGARCH", garchOrder = c(r,s)),
+                                 distribution.model = "norm")
+      garch_m_fit = ugarchfit(spec=garch_m_spec, data=rAAPL, solver = "solnp", solver.control = list(ftol_rel=1e-11,xtol_rel=1e-11, maxeval=10000))
+      AIC_matrix[p + 1, r, s] = infocriteria(garch_m_fit)[1]
+    }
+  }
+}
+
+# Find the indices of the minimum AIC value
+min_AIC_indices = which(AIC_matrix == min(AIC_matrix, na.rm = TRUE), arr.ind = TRUE)
+
+# Extract the best p, r, and s values
+best_p = min_AIC_indices[1] - 1
+best_r = min_AIC_indices[2]
+best_s = min_AIC_indices[3]
+
+cat("AIC Matrix:\n")
+for (p in p_range) {
+  cat("\n")
+  cat("p =", p, "\n")
+  print(matrix(AIC_matrix[p + 1,,], nrow = 3, byrow = TRUE))
+}
+
+cat("\nBest ARMA Order (p):", best_p, "\n")
+cat("Best GARCH Order (r,s):", best_r, best_s, "\n")
+
+#checker:
+Sgarch13.Spec  = ugarchspec(mean.model = list(armaOrder = c(0, 0), include.mean = TRUE),
+                                     variance.model = list(model = "sGARCH", garchOrder = c(1,3)),
+                                     distribution.model = "norm")
+NVDA.Est31 = ugarchfit(spec=Sgarch13.Spec, data=rAAPL, solver = "solnp", solver.control = list(ftol_rel=1e-11,xtol_rel=1e-11, maxeval=10000))
+infocriteria(NVDA.Est31)[1]
+
+#MSFT
+# The following code is supposed to identify the best p and r&s order simultaneously for s GARCH models without a mean
+#AAPLret
+p_range = 0:2
+AIC_matrix = array(NA, dim = c(length(p_range), 3, 3))
+
+for (p in p_range) {
+  for (r in 1:3){
+    for (s in 1:3){
+      garch_m_spec = ugarchspec(mean.model = list(armaOrder = c(p, 0), include.mean = TRUE),
+                                 variance.model = list(model = "sGARCH", garchOrder = c(r,s)),
+                                 distribution.model = "norm")
+      garch_m_fit = ugarchfit(spec=garch_m_spec, data=rMSFT, solver = "solnp", solver.control = list(ftol_rel=1e-11,xtol_rel=1e-11, maxeval=10000))
+      AIC_matrix[p + 1, r, s] = infocriteria(garch_m_fit)[1]
+    }
+  }
+}
+
+# Find the indices of the minimum AIC value
+min_AIC_indices = which(AIC_matrix == min(AIC_matrix, na.rm = TRUE), arr.ind = TRUE)
+
+# Extract the best p, r, and s values
+best_p = min_AIC_indices[1] - 1
+best_r = min_AIC_indices[2]
+best_s = min_AIC_indices[3]
+
+cat("AIC Matrix:\n")
+for (p in p_range) {
+  cat("\n")
+  cat("p =", p, "\n")
+  print(matrix(AIC_matrix[p + 1,,], nrow = 3, byrow = TRUE))
+}
+
+cat("\nBest ARMA Order (p):", best_p, "\n")
+cat("Best GARCH Order (r,s):", best_r, best_s, "\n")
+
+#AMZN
+# The following code is supposed to identify the best p and r&s order simultaneously for s GARCH models without a mean
+#AAPLret
+p_range = 0:2
+AIC_matrix = array(NA, dim = c(length(p_range), 3, 3))
+
+for (p in p_range) {
+  for (r in 1:3){
+    for (s in 1:3){
+      garch_m_spec = ugarchspec(mean.model = list(armaOrder = c(p, 0), include.mean = TRUE),
+                                 variance.model = list(model = "sGARCH", garchOrder = c(r,s)),
+                                 distribution.model = "norm")
+      garch_m_fit = ugarchfit(spec=garch_m_spec, data=rAMZN, solver = "solnp", solver.control = list(ftol_rel=1e-11,xtol_rel=1e-11, maxeval=10000))
+      AIC_matrix[p + 1, r, s] = infocriteria(garch_m_fit)[1]
+    }
+  }
+}
+
+# Find the indices of the minimum AIC value
+min_AIC_indices = which(AIC_matrix == min(AIC_matrix, na.rm = TRUE), arr.ind = TRUE)
+
+# Extract the best p, r, and s values
+best_p = min_AIC_indices[1] - 1
+best_r = min_AIC_indices[2]
+best_s = min_AIC_indices[3]
+
+cat("AIC Matrix:\n")
+for (p in p_range) {
+  cat("\n")
+  cat("p =", p, "\n")
+  print(matrix(AIC_matrix[p + 1,,], nrow = 3, byrow = TRUE))
+}
+
+cat("\nBest ARMA Order (p):", best_p, "\n")
+cat("Best GARCH Order (r,s):", best_r, best_s, "\n")
+
+#NVDA
+p_range = 0:2
+AIC_matrix = array(NA, dim = c(length(p_range), 3, 3))
+
+for (p in p_range) {
+  for (r in 1:3){
+    for (s in 1:3){
+      garch_m_spec = ugarchspec(mean.model = list(armaOrder = c(p, 0), include.mean = TRUE),
+                                 variance.model = list(model = "sGARCH", garchOrder = c(r,s)),
+                                 distribution.model = "norm")
+      garch_m_fit = ugarchfit(spec=garch_m_spec, data=rNVDA, solver = "solnp", solver.control = list(ftol_rel=1e-11,xtol_rel=1e-11, maxeval=10000))
+      AIC_matrix[p + 1, r, s] = infocriteria(garch_m_fit)[1]
+    }
+  }
+}
+
+# Find the indices of the minimum AIC value
+min_AIC_indices = which(AIC_matrix == min(AIC_matrix, na.rm = TRUE), arr.ind = TRUE)
+
+# Extract the best p, r, and s values
+best_p = min_AIC_indices[1] - 1
+best_r = min_AIC_indices[2]
+best_s = min_AIC_indices[3]
+
+cat("AIC Matrix:\n")
+for (p in p_range) {
+  cat("\n")
+  cat("p =", p, "\n")
+  print(matrix(AIC_matrix[p + 1,,], nrow = 3, byrow = TRUE))
+}
+
+cat("\nBest ARMA Order (p):", best_p, "\n")
+cat("Best GARCH Order (r,s):", best_r, best_s, "\n")
+
+#BRKB-B
+p_range = 0:2
+AIC_matrix = array(NA, dim = c(length(p_range), 3, 3))
+
+for (p in p_range) {
+  for (r in 1:3){
+    for (s in 1:3){
+      garch_m_spec = ugarchspec(mean.model = list(armaOrder = c(p, 0), include.mean = TRUE),
+                                 variance.model = list(model = "sGARCH", garchOrder = c(r,s)),
+                                 distribution.model = "norm")
+      garch_m_fit = ugarchfit(spec=garch_m_spec, data=rBRK, solver = "solnp", solver.control = list(ftol_rel=1e-11,xtol_rel=1e-11, maxeval=10000))
+      AIC_matrix[p + 1, r, s] = infocriteria(garch_m_fit)[1]
+    }
+  }
+}
+
+# Find the indices of the minimum AIC value
+min_AIC_indices = which(AIC_matrix == min(AIC_matrix, na.rm = TRUE), arr.ind = TRUE)
+
+# Extract the best p, r, and s values
+best_p = min_AIC_indices[1] - 1
+best_r = min_AIC_indices[2]
+best_s = min_AIC_indices[3]
+
+cat("AIC Matrix:\n")
+for (p in p_range) {
+  cat("\n")
+  cat("p =", p, "\n")
+  print(matrix(AIC_matrix[p + 1,,], nrow = 3, byrow = TRUE))
+}
+
+cat("\nBest ARMA Order (p):", best_p, "\n")
+cat("Best GARCH Order (r,s):", best_r, best_s, "\n")
+
+#FOR sGARCH the best models are: AAPL: AR(0) - sGARCH(1,3), MSFT: AR(1) - sGARCH(2,1), AMZN: AR(0) - sGARCH(1,1), NVDA: AR(0) - sGARCH(1,1), BRKB: AR(1) -sGARCH(1,2),
+
+
+```
+
+```{r Determine_best_GJRrs}
+#| echo: false
+#| message: false
+#| warning: false
+#| output: false
+#| eval: false
+#AAPL
+p_range = 0:2
+AIC_matrix = array(NA, dim = c(length(p_range), 3, 3))
+
+for (p in p_range) {
+  for (r in 1:3){
+    for (s in 1:3){
+      garch_m_spec = ugarchspec(mean.model = list(armaOrder = c(p, 0), include.mean = TRUE),
+                                 variance.model = list(model = "gjrGARCH", garchOrder = c(r,s)),
+                                 distribution.model = "norm")
+      garch_m_fit = ugarchfit(spec=garch_m_spec, data=rAAPL, solver = "solnp", solver.control = list(ftol_rel=1e-11,xtol_rel=1e-11, maxeval=10000))
+      
+      if (garch_m_fit@fit$convergence == 0) {
+        AIC_matrix[p + 1, r, s] = infocriteria(garch_m_fit)[1]
+      } else {
+        AIC_matrix[p + 1, r, s] = 1e6 # Assign a large AIC value
+      }
+    }
+  }
+}
+
+# Find the indices of the minimum AIC value
+min_AIC_indices = which(AIC_matrix == min(AIC_matrix, na.rm = TRUE), arr.ind = TRUE)
+
+# Extract the best p, r, and s values
+best_p = min_AIC_indices[1] - 1
+best_r = min_AIC_indices[2]
+best_s = min_AIC_indices[3]
+
+cat("AIC Matrix:\n")
+for (p in p_range) {
+  cat("\n")
+  cat("p =", p, "\n")
+  print(matrix(AIC_matrix[p + 1,,], nrow = 3, ncol = 3, byrow = TRUE))
+}
+
+cat("\nBest ARMA Order (p):", best_p, "\n")
+cat("Best GARCH Order (r,s):", best_r, best_s, "\n")
+
+# MSFT
+p_range = 0:2
+AIC_matrix = array(NA, dim = c(length(p_range), 3, 3))
+
+for (p in p_range) {
+  for (r in 1:3){
+    for (s in 1:3){
+      garch_m_spec = ugarchspec(mean.model = list(armaOrder = c(p, 0), include.mean = TRUE),
+                                 variance.model = list(model = "gjrGARCH", garchOrder = c(r,s)),
+                                 distribution.model = "norm")
+      garch_m_fit = ugarchfit(spec=garch_m_spec, data=rMSFT, solver = "solnp", solver.control = list(ftol_rel=1e-11,xtol_rel=1e-11, maxeval=10000))
+      AIC_matrix[p + 1, r, s] = infocriteria(garch_m_fit)[1]
+    }
+  }
+}
+
+# Find the indices of the minimum AIC value
+min_AIC_indices = which(AIC_matrix == min(AIC_matrix, na.rm = TRUE), arr.ind = TRUE)
+
+# Extract the best p, r, and s values
+best_p = min_AIC_indices[1] - 1
+best_r = min_AIC_indices[2]
+best_s = min_AIC_indices[3]
+
+cat("AIC Matrix:\n")
+for (p in p_range) {
+  cat("\n")
+  cat("p =", p, "\n")
+  print(matrix(AIC_matrix[p + 1,,], nrow = 3, byrow = TRUE))
+}
+
+cat("\nBest ARMA Order (p):", best_p, "\n")
+cat("Best GARCH Order (r,s):", best_r, best_s, "\n")
+
+# AMZN
+p_range = 0:2
+AIC_matrix = array(NA, dim = c(length(p_range), 3, 3))
+
+for (p in p_range) {
+  for (r in 1:3){
+    for (s in 1:3){
+      garch_m_spec = ugarchspec(mean.model = list(armaOrder = c(p, 0), include.mean = TRUE),
+                                 variance.model = list(model = "gjrGARCH", garchOrder = c(r,s)),
+                                 distribution.model = "norm")
+      garch_m_fit = ugarchfit(spec=garch_m_spec, data=rAMZN, solver = "solnp", solver.control = list(ftol_rel=1e-11,xtol_rel=1e-11, maxeval=10000))
+      AIC_matrix[p + 1, r, s] = infocriteria(garch_m_fit)[1]
+    }
+  }
+}
+
+# Find the indices of the minimum AIC value
+min_AIC_indices = which(AIC_matrix == min(AIC_matrix, na.rm = TRUE), arr.ind = TRUE)
+
+# Extract the best p, r, and s values
+best_p = min_AIC_indices[1] - 1
+best_r = min_AIC_indices[2]
+best_s = min_AIC_indices[3]
+
+cat("AIC Matrix:\n")
+for (p in p_range) {
+  cat("\n")
+  cat("p =", p, "\n")
+  print(matrix(AIC_matrix[p + 1,,], nrow = 3, byrow = TRUE))
+}
+
+cat("\nBest ARMA Order (p):", best_p, "\n")
+cat("Best GARCH Order (r,s):", best_r, best_s, "\n")
+
+#NVDA
+p_range = 0:2
+AIC_matrix = array(NA, dim = c(length(p_range), 3, 3))
+
+for (p in p_range) {
+  for (r in 1:3){
+    for (s in 1:3){
+      garch_m_spec = ugarchspec(mean.model = list(armaOrder = c(p, 0), include.mean = TRUE),
+                                 variance.model = list(model = "gjrGARCH", garchOrder = c(r,s)),
+                                 distribution.model = "norm")
+      garch_m_fit = ugarchfit(spec=garch_m_spec, data=rNVDA, solver = "solnp", solver.control = list(ftol_rel=1e-11,xtol_rel=1e-11, maxeval=10000))
+      AIC_matrix[p + 1, r, s] = infocriteria(garch_m_fit)[1]
+    }
+  }
+}
+
+# Find the indices of the minimum AIC value
+min_AIC_indices = which(AIC_matrix == min(AIC_matrix, na.rm = TRUE), arr.ind = TRUE)
+
+# Extract the best p, r, and s values
+best_p = min_AIC_indices[1] - 1
+best_r = min_AIC_indices[2]
+best_s = min_AIC_indices[3]
+
+cat("AIC Matrix:\n")
+for (p in p_range) {
+  cat("\n")
+  cat("p =", p, "\n")
+  print(matrix(AIC_matrix[p + 1,,], nrow = 3, byrow = TRUE))
+}
+
+cat("\nBest ARMA Order (p):", best_p, "\n")
+cat("Best GARCH Order (r,s):", best_r, best_s, "\n")
+
+#BRKB
+p_range = 0:2
+AIC_matrix = array(NA, dim = c(length(p_range), 3, 3))
+
+for (p in p_range) {
+  for (r in 1:3){
+    for (s in 1:3){
+      garch_m_spec = ugarchspec(mean.model = list(armaOrder = c(p, 0), include.mean = TRUE),
+                                 variance.model = list(model = "gjrGARCH", garchOrder = c(r,s)),
+                                 distribution.model = "norm")
+      garch_m_fit = ugarchfit(spec=garch_m_spec, data=rBRK, solver = "solnp", solver.control = list(ftol_rel=1e-11,xtol_rel=1e-11, maxeval=10000))
+      AIC_matrix[p + 1, r, s] = infocriteria(garch_m_fit)[1]
+    }
+  }
+}
+
+# Find the indices of the minimum AIC value
+min_AIC_indices = which(AIC_matrix == min(AIC_matrix, na.rm = TRUE), arr.ind = TRUE)
+
+# Extract the best p, r, and s values
+best_p = min_AIC_indices[1] - 1
+best_r = min_AIC_indices[2]
+best_s = min_AIC_indices[3]
+
+cat("AIC Matrix:\n")
+for (p in p_range) {
+  cat("\n")
+  cat("p =", p, "\n")
+  print(matrix(AIC_matrix[p + 1,,], nrow = 3, byrow = TRUE))
+}
+
+cat("\nBest ARMA Order (p):", best_p, "\n")
+cat("Best GARCH Order (r,s):", best_r, best_s, "\n")
+```
+
+```{r Determine_best_GARCHim}
+#| echo: false
+#| message: false
+#| warning: false
+#| output: false
+#| eval: false
+# The following code is supposed to identify the best p and r&s order simultaneously for GARCH-in-Mean models
+#AAPLret
+p_range = 0:2
+AIC_matrix = array(NA, dim = c(length(p_range), 3, 3))
+
+for (p in p_range) {
+  for (r in 1:3){
+    for (s in 1:3){
+      garch_m_spec = ugarchspec(mean.model = list(armaOrder = c(p, 0), include.mean = TRUE, archm = TRUE),
+                                 variance.model = list(model = "sGARCH", garchOrder = c(r,s)),
+                                 distribution.model = "norm")
+      garch_m_fit = ugarchfit(spec=garch_m_spec, data=rAAPL, solver = "solnp", solver.control = list(ftol_rel=1e-11,xtol_rel=1e-11, maxeval=10000))
+      AIC_matrix[p + 1, r, s] = infocriteria(garch_m_fit)[1]
+    }
+  }
+}
+
+# Find the indices of the minimum AIC value
+min_AIC_indices = which(AIC_matrix == min(AIC_matrix, na.rm = TRUE), arr.ind = TRUE)
+
+# Extract the best p, r, and s values
+best_p = min_AIC_indices[1] - 1
+best_r = min_AIC_indices[2]
+best_s = min_AIC_indices[3]
+
+cat("AIC Matrix:\n")
+for (p in p_range) {
+  cat("\n")
+  cat("p =", p, "\n")
+  print(matrix(AIC_matrix[p + 1,,], nrow = 3, byrow = TRUE))
+}
+
+cat("\nBest ARMA Order (p):", best_p, "\n")
+cat("Best GARCH Order (r,s):", best_r, best_s, "\n")
+
+#MSFTret
+p_range = 0:2
+AIC_matrix = array(NA, dim = c(length(p_range), 3, 3))
+
+for (p in p_range) {
+  for (r in 1:3){
+    for (s in 1:3){
+      garch_m_spec = ugarchspec(mean.model = list(armaOrder = c(p, 0), include.mean = TRUE, archm = TRUE),
+                                 variance.model = list(model = "sGARCH", garchOrder = c(r,s)),
+                                 distribution.model = "norm")
+      garch_m_fit = ugarchfit(spec=garch_m_spec, data=rMSFT, solver = "solnp", solver.control = list(ftol_rel=1e-11,xtol_rel=1e-11, maxeval=10000))
+      AIC_matrix[p + 1, r, s] = infocriteria(garch_m_fit)[1]
+    }
+  }
+}
+
+# Find the indices of the minimum AIC value
+min_AIC_indices = which(AIC_matrix == min(AIC_matrix, na.rm = TRUE), arr.ind = TRUE)
+
+# Extract the best p, r, and s values
+best_p = min_AIC_indices[1] - 1
+best_r = min_AIC_indices[2]
+best_s = min_AIC_indices[3]
+
+cat("AIC Matrix:\n")
+for (p in p_range) {
+  cat("\n")
+  cat("p =", p, "\n")
+  print(matrix(AIC_matrix[p + 1,,], nrow = 3, byrow = TRUE))
+}
+
+cat("\nBest ARMA Order (p):", best_p, "\n")
+cat("Best GARCH Order (r,s):", best_r, best_s, "\n")
+
+#AMZNret
+p_range = 0:2
+AIC_matrix = array(NA, dim = c(length(p_range), 3, 3))
+
+for (p in p_range) {
+  for (r in 1:3){
+    for (s in 1:3){
+      garch_m_spec = ugarchspec(mean.model = list(armaOrder = c(p, 0), include.mean = TRUE, archm = TRUE),
+                                 variance.model = list(model = "sGARCH", garchOrder = c(r,s)),
+                                 distribution.model = "norm")
+      garch_m_fit = ugarchfit(spec=garch_m_spec, data=rAMZN, solver = "solnp", solver.control = list(ftol_rel=1e-11,xtol_rel=1e-11, maxeval=10000))
+      AIC_matrix[p + 1, r, s] = infocriteria(garch_m_fit)[1]
+    }
+  }
+}
+
+# Find the indices of the minimum AIC value
+min_AIC_indices = which(AIC_matrix == min(AIC_matrix, na.rm = TRUE), arr.ind = TRUE)
+
+# Extract the best p, r, and s values
+best_p = min_AIC_indices[1] - 1
+best_r = min_AIC_indices[2]
+best_s = min_AIC_indices[3]
+
+cat("AIC Matrix:\n")
+for (p in p_range) {
+  cat("\n")
+  cat("p =", p, "\n")
+  print(matrix(AIC_matrix[p + 1,,], nrow = 3, byrow = TRUE))
+}
+
+cat("\nBest ARMA Order (p):", best_p, "\n")
+cat("Best GARCH Order (r,s):", best_r, best_s, "\n")
+
+#NVDA
+p_range = 0:2
+AIC_matrix = array(NA, dim = c(length(p_range), 3, 3))
+
+for (p in p_range) {
+  for (r in 1:3){
+    for (s in 1:3){
+      garch_m_spec = ugarchspec(mean.model = list(armaOrder = c(p, 0), include.mean = TRUE, archm = TRUE),
+                                 variance.model = list(model = "sGARCH", garchOrder = c(r,s)),
+                                 distribution.model = "norm")
+      garch_m_fit = ugarchfit(spec=garch_m_spec, data=rNVDA, solver = "solnp", solver.control = list(ftol_rel=1e-11,xtol_rel=1e-11, maxeval=10000))
+      AIC_matrix[p + 1, r, s] = infocriteria(garch_m_fit)[1]
+    }
+  }
+}
+
+# Find the indices of the minimum AIC value
+min_AIC_indices = which(AIC_matrix == min(AIC_matrix, na.rm = TRUE), arr.ind = TRUE)
+
+# Extract the best p, r, and s values
+best_p = min_AIC_indices[1] - 1
+best_r = min_AIC_indices[2]
+best_s = min_AIC_indices[3]
+
+cat("AIC Matrix:\n")
+for (p in p_range) {
+  cat("\n")
+  cat("p =", p, "\n")
+  print(matrix(AIC_matrix[p + 1,,], nrow = 3, byrow = TRUE))
+}
+
+cat("\nBest ARMA Order (p):", best_p, "\n")
+cat("Best GARCH Order (r,s):", best_r, best_s, "\n")
+
+#BRKB
+p_range = 0:2
+AIC_matrix = array(NA, dim = c(length(p_range), 3, 3))
+
+for (p in p_range) {
+  for (r in 1:3){
+    for (s in 1:3){
+      garch_m_spec = ugarchspec(mean.model = list(armaOrder = c(p, 0), include.mean = TRUE, archm = TRUE),
+                                 variance.model = list(model = "sGARCH", garchOrder = c(r,s)),
+                                 distribution.model = "norm")
+      garch_m_fit = ugarchfit(spec=garch_m_spec, data=rBRK, solver = "solnp", solver.control = list(ftol_rel=1e-11,xtol_rel=1e-11, maxeval=10000))
+      AIC_matrix[p + 1, r, s] = infocriteria(garch_m_fit)[1]
+    }
+  }
+}
+
+# Find the indices of the minimum AIC value
+min_AIC_indices = which(AIC_matrix == min(AIC_matrix, na.rm = TRUE), arr.ind = TRUE)
+
+# Extract the best p, r, and s values
+best_p = min_AIC_indices[1] - 1
+best_r = min_AIC_indices[2]
+best_s = min_AIC_indices[3]
+
+cat("AIC Matrix:\n")
+for (p in p_range) {
+  cat("\n")
+  cat("p =", p, "\n")
+  print(matrix(AIC_matrix[p + 1,,], nrow = 3, byrow = TRUE))
+}
+
+cat("\nBest ARMA Order (p):", best_p, "\n")
+cat("Best GARCH Order (r,s):", best_r, best_s, "\n")
+
+#For Garch-in-Mean the best models are : AAPL: AR(0) - GARCH-in-mean(1,3), AIC:6.059087 MSFT: AR(1) - GARCH-in-mean(2,1),AIC:5.416704 AMZN: AR(0) - GARCH-in-mean(1,1),AIC:6.351577 NVDA: AR(0) - GARCH-in-mean(1,1), AIC:6.809938 BRKB: AR(1) - GARCH-in-mean(1,2), AIC:4.846995
+```
+
+```{r Determine_best_GJRim_rs}
+#| echo: false
+#| message: false
+#| warning: false
+#| output: false
+#| eval: false
+
+# The following code identifys the best p and r&s order simultaneously for GJR-GARCH models with mean
+#AAPL
+p_range = 0:2
+AIC_matrix = array(NA, dim = c(length(p_range), 3, 3))
+
+for (p in p_range) {
+  for (r in 1:3){
+    for (s in 1:3){
+      garch_m_spec = ugarchspec(mean.model = list(armaOrder = c(p, 0), include.mean = TRUE, archm = TRUE),
+                                 variance.model = list(model = "gjrGARCH", garchOrder = c(r,s)),
+                                 distribution.model = "norm")
+      garch_m_fit = ugarchfit(spec=garch_m_spec, data=rAAPL, solver = "solnp", solver.control = list(ftol_rel=1e-11,xtol_rel=1e-11, maxeval=10000))
+      
+      if (garch_m_fit@fit$convergence == 0) {
+        AIC_matrix[p + 1, r, s] = infocriteria(garch_m_fit)[1]
+      } else {
+        AIC_matrix[p + 1, r, s] = 1e6 # Assign a large AIC value
+      }
+    }
+  }
+}
+
+# Find the indices of the minimum AIC value
+min_AIC_indices = which(AIC_matrix == min(AIC_matrix, na.rm = TRUE), arr.ind = TRUE)
+
+# Extract the best p, r, and s values
+best_p = min_AIC_indices[1] - 1
+best_r = min_AIC_indices[2]
+best_s = min_AIC_indices[3]
+
+cat("AIC Matrix:\n")
+for (p in p_range) {
+  cat("\n")
+  cat("p =", p, "\n")
+  print(matrix(AIC_matrix[p + 1,,], nrow = 3, ncol = 3, byrow = TRUE))
+}
+
+cat("\nBest ARMA Order (p):", best_p, "\n")
+cat("Best GARCH Order (r,s):", best_r, best_s, "\n")
+
+# MSFT
+p_range = 0:2
+AIC_matrix = array(NA, dim = c(length(p_range), 3, 3))
+
+for (p in p_range) {
+  for (r in 1:3){
+    for (s in 1:3){
+      garch_m_spec = ugarchspec(mean.model = list(armaOrder = c(p, 0), include.mean = TRUE, archm = TRUE),
+                                 variance.model = list(model = "gjrGARCH", garchOrder = c(r,s)),
+                                 distribution.model = "norm")
+      garch_m_fit = ugarchfit(spec=garch_m_spec, data=rMSFT, solver = "solnp", solver.control = list(ftol_rel=1e-11,xtol_rel=1e-11, maxeval=10000))
+      AIC_matrix[p + 1, r, s] = infocriteria(garch_m_fit)[1]
+    }
+  }
+}
+
+# Find the indices of the minimum AIC value
+min_AIC_indices = which(AIC_matrix == min(AIC_matrix, na.rm = TRUE), arr.ind = TRUE)
+
+# Extract the best p, r, and s values
+best_p = min_AIC_indices[1] - 1
+best_r = min_AIC_indices[2]
+best_s = min_AIC_indices[3]
+
+cat("AIC Matrix:\n")
+for (p in p_range) {
+  cat("\n")
+  cat("p =", p, "\n")
+  print(matrix(AIC_matrix[p + 1,,], nrow = 3, byrow = TRUE))
+}
+
+cat("\nBest ARMA Order (p):", best_p, "\n")
+cat("Best GARCH Order (r,s):", best_r, best_s, "\n")
+
+#AMZN
+p_range = 0:2
+AIC_matrix = array(NA, dim = c(length(p_range), 3, 3))
+
+for (p in p_range) {
+  for (r in 1:3){
+    for (s in 1:3){
+      garch_m_spec = ugarchspec(mean.model = list(armaOrder = c(p, 0), include.mean = TRUE, archm = TRUE),
+                                 variance.model = list(model = "gjrGARCH", garchOrder = c(r,s)),
+                                 distribution.model = "norm")
+      garch_m_fit = ugarchfit(spec=garch_m_spec, data=rAMZN, solver = "solnp", solver.control = list(ftol_rel=1e-11,xtol_rel=1e-11, maxeval=10000))
+      AIC_matrix[p + 1, r, s] = infocriteria(garch_m_fit)[1]
+    }
+  }
+}
+
+# Find the indices of the minimum AIC value
+min_AIC_indices = which(AIC_matrix == min(AIC_matrix, na.rm = TRUE), arr.ind = TRUE)
+
+# Extract the best p, r, and s values
+best_p = min_AIC_indices[1] - 1
+best_r = min_AIC_indices[2]
+best_s = min_AIC_indices[3]
+
+cat("AIC Matrix:\n")
+for (p in p_range) {
+  cat("\n")
+  cat("p =", p, "\n")
+  print(matrix(AIC_matrix[p + 1,,], nrow = 3, byrow = TRUE))
+}
+
+cat("\nBest ARMA Order (p):", best_p, "\n")
+cat("Best GARCH Order (r,s):", best_r, best_s, "\n")
+
+#NVDA
+p_range = 0:2
+AIC_matrix = array(NA, dim = c(length(p_range), 3, 3))
+
+for (p in p_range) {
+  for (r in 1:3){
+    for (s in 1:3){
+      garch_m_spec = ugarchspec(mean.model = list(armaOrder = c(p, 0), include.mean = TRUE, archm = TRUE),
+                                 variance.model = list(model = "gjrGARCH", garchOrder = c(r,s)),
+                                 distribution.model = "norm")
+      garch_m_fit = ugarchfit(spec=garch_m_spec, data=rNVDA, solver = "solnp", solver.control = list(ftol_rel=1e-11,xtol_rel=1e-11, maxeval=10000))
+      AIC_matrix[p + 1, r, s] = infocriteria(garch_m_fit)[1]
+    }
+  }
+}
+
+# Find the indices of the minimum AIC value
+min_AIC_indices = which(AIC_matrix == min(AIC_matrix, na.rm = TRUE), arr.ind = TRUE)
+
+# Extract the best p, r, and s values
+best_p = min_AIC_indices[1] - 1
+best_r = min_AIC_indices[2]
+best_s = min_AIC_indices[3]
+
+cat("AIC Matrix:\n")
+for (p in p_range) {
+  cat("\n")
+  cat("p =", p, "\n")
+  print(matrix(AIC_matrix[p + 1,,], nrow = 3, byrow = TRUE))
+}
+
+cat("\nBest ARMA Order (p):", best_p, "\n")
+cat("Best GARCH Order (r,s):", best_r, best_s, "\n")
+
+#BRKB
+p_range = 0:2
+AIC_matrix = array(NA, dim = c(length(p_range), 3, 3))
+
+for (p in p_range) {
+  for (r in 1:3){
+    for (s in 1:3){
+      garch_m_spec = ugarchspec(mean.model = list(armaOrder = c(p, 0), include.mean = TRUE, archm = TRUE),
+                                 variance.model = list(model = "gjrGARCH", garchOrder = c(r,s)),
+                                 distribution.model = "norm")
+      garch_m_fit = ugarchfit(spec=garch_m_spec, data=rBRK, solver = "solnp", solver.control = list(ftol_rel=1e-11,xtol_rel=1e-11, maxeval=10000))
+      AIC_matrix[p + 1, r, s] = infocriteria(garch_m_fit)[1]
+    }
+  }
+}
+
+# Find the indices of the minimum AIC value
+min_AIC_indices = which(AIC_matrix == min(AIC_matrix, na.rm = TRUE), arr.ind = TRUE)
+
+# Extract the best p, r, and s values
+best_p = min_AIC_indices[1] - 1
+best_r = min_AIC_indices[2]
+best_s = min_AIC_indices[3]
+
+cat("AIC Matrix:\n")
+for (p in p_range) {
+  cat("\n")
+  cat("p =", p, "\n")
+  print(matrix(AIC_matrix[p + 1,,], nrow = 3, byrow = TRUE))
+}
+
+cat("\nBest ARMA Order (p):", best_p, "\n")
+cat("Best GARCH Order (r,s):", best_r, best_s, "\n")
+```
+
+```{r GARCH_RMFSE_norm}
+#| echo: false
+#| message: false
+#| warning: false
+#| output: false
+#| eval: false
+###AAPl####
+# Set parameters
+p = 1
+h = 26
+T = length(rAAPL)
+
+# Split the return series into estimation and forecasting datasets
+Stock.est = rAAPL[1:(T-h)]
+W.AAPL.for = AAPL.RVw[(T-h+1):T]
+
+
+# Re-estimate the GJR-GARCH model using the estimation dataset
+garch.spec = ugarchspec(mean.model = list(armaOrder = c(p, 0), include.mean = TRUE),
+                                       variance.model = list(model = "gjrGARCH", garchOrder = c(3,1)),
+                                       distribution.model = "norm")
+garch.fit = ugarchfit(spec=garch.spec, data=Stock.est, solver = "solnp", solver.control = list(ftol_rel=1e-11,xtol_rel=1e-11, maxeval=10000))
+
+# Generate sigma forecasts for the GJR-GARCH model
+garch.fore = ugarchforecast(garch.fit, n.ahead = 26)
+sigma.f = sigma(garch.fore)
+variance.f = sigma.f^2
+
+# Calculate the RMFSE MAFE for the forecasted volatilities
+sqrt(mean((AAPL.RVw[1242:1267] - variance.f)^2))
+mean(abs(AAPL.RVw[1242:1267] - variance.f))
+
+###MSFT###
+# Set parameters
+p = 1
+h = 26
+T = length(rMSFT)
+
+# Split the return series into estimation and forecasting datasets
+Stock.est = rMSFT[1:(T-h)]
+W.MSFT.for = MSFT.RVw[(T-h+1):T]
+
+
+# Re-estimate the GJR-GARCH model using the estimation dataset
+garch.spec = ugarchspec(mean.model = list(armaOrder = c(p, 0), include.mean = TRUE),
+                                       variance.model = list(model = "gjrGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "norm")
+garch.fit = ugarchfit(spec=garch.spec, data=Stock.est, solver = "solnp", solver.control = list(ftol_rel=1e-11,xtol_rel=1e-11, maxeval=10000))
+
+# Generate sigma forecasts for the GJR-GARCH model
+garch.fore = ugarchforecast(garch.fit, n.ahead = 26)
+sigma.f = sigma(garch.fore)
+variance.f = sigma.f^2
+
+# Calculate the RMFSE MAFE for the forecasted volatilities
+sqrt(mean((MSFT.RVw[1242:1267] - variance.f)^2))
+mean(abs(MSFT.RVw[1242:1267] - variance.f))
+
+###AMZN###
+# Set parameters
+p = 1
+h = 26
+T = length(rAMZN)
+
+# Split the return series into estimation and forecasting datasets
+Stock.est = rAMZN[1:(T-h)]
+W.AMZN.for = AMZN.RVw[(T-h+1):T]
+
+
+# Re-estimate the GJR-GARCH model using the estimation dataset
+garch.spec = ugarchspec(mean.model = list(armaOrder = c(p, 0), include.mean = TRUE, archm = TRUE),
+                                       variance.model = list(model = "gjrGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "norm")
+garch.fit = ugarchfit(spec=garch.spec, data=Stock.est, solver = "solnp", solver.control = list(ftol_rel=1e-11,xtol_rel=1e-11, maxeval=10000))
+
+# Generate sigma forecasts for the GJR-GARCH model
+garch.fore = ugarchforecast(garch.fit, n.ahead = 26)
+sigma.f = sigma(garch.fore)
+variance.f = sigma.f^2
+
+# Calculate the RMFSE MAFE for the forecasted volatilities
+sqrt(mean((AMZN.RVw[1242:1267] - variance.f)^2))
+mean(abs(AMZN.RVw[1242:1267] - variance.f))
+
+###NVDA###
+# Set parameters
+p = 1
+h = 26
+T = length(rNVDA)
+
+# Split the return series into estimation and forecasting datasets
+Stock.est = rNVDA[1:(T-h)]
+W.NVDA.for = NVDA.RVw[(T-h+1):T]
+
+
+# Re-estimate the GJR-GARCH model using the estimation dataset
+garch.spec = ugarchspec(mean.model = list(armaOrder = c(p, 0), include.mean = TRUE, archm = TRUE),
+                                       variance.model = list(model = "gjrGARCH", garchOrder = c(2,2)),
+                                       distribution.model = "norm")
+garch.fit = ugarchfit(spec=garch.spec, data=Stock.est, solver = "solnp", solver.control = list(ftol_rel=1e-11,xtol_rel=1e-11, maxeval=10000))
+
+# Generate sigma forecasts for the GJR-GARCH model
+garch.fore = ugarchforecast(garch.fit, n.ahead = 26)
+sigma.f = sigma(garch.fore)
+variance.f = sigma.f^2
+
+# Calculate the RMFSE MAFE for the forecasted volatilities
+sqrt(mean((NVDA.RVw[1242:1267] - variance.f)^2))
+mean(abs(NVDA.RVw[1242:1267] - variance.f))
+
+###BRKB###
+# Set parameters
+p = 1
+h = 26
+T = length(rBRK)
+
+# Split the return series into estimation and forecasting datasets
+Stock.est = rBRK[1:(T-h)]
+W.BRKB.for = BRK.RVw[(T-h+1):T]
+
+
+# Re-estimate the GJR-GARCH model using the estimation dataset
+garch.spec = ugarchspec(mean.model = list(armaOrder = c(p, 0), include.mean = TRUE),
+                                       variance.model = list(model = "gjrGARCH", garchOrder = c(3,3)),
+                                       distribution.model = "norm")
+garch.fit = ugarchfit(spec=garch.spec, data=Stock.est, solver = "solnp", solver.control = list(ftol_rel=1e-11,xtol_rel=1e-11, maxeval=10000))
+
+# Generate sigma forecasts for the GJR-GARCH model
+garch.fore = ugarchforecast(garch.fit, n.ahead = 26)
+sigma.f = sigma(garch.fore)
+variance.f = sigma.f^2
+
+# Calculate the RMFSE MAFE for the forecasted volatilities
+sqrt(mean((BRK.RVw[1242:1267] - variance.f)^2))
+mean(abs(BRK.RVw[1242:1267] - variance.f))
+```
+
+```{r GARCH_RMSFE_std}
+#| echo: false
+#| message: false
+#| warning: false
+#| output: false
+#| eval: false
+###AAPl####
+# Set parameters
+p = 1
+h = 26
+T = length(rAAPL)
+
+# Split the return series into estimation and forecasting datasets
+Stock.est = rAAPL[1:(T-h)]
+W.AAPL.for = AAPL.RVw[(T-h+1):T]
+
+
+# Re-estimate the GJR-GARCH model using the estimation dataset
+garch.spec = ugarchspec(mean.model = list(armaOrder = c(p, 0), include.mean = TRUE),
+                                       variance.model = list(model = "gjrGARCH", garchOrder = c(3,1)),
+                                       distribution.model = "std")
+garch.fit = ugarchfit(spec=garch.spec, data=Stock.est, solver = "solnp", solver.control = list(ftol_rel=1e-11,xtol_rel=1e-11, maxeval=10000))
+
+# Generate sigma forecasts for the GJR-GARCH model
+garch.fore = ugarchforecast(garch.fit, n.ahead = 26)
+sigma.f = sigma(garch.fore)
+variance.f = sigma.f^2
+
+# Calculate the RMFSE MAFE for the forecasted volatilities
+sqrt(mean((AAPL.RVw[1242:1267] - variance.f)^2))
+mean(abs(AAPL.RVw[1242:1267] - variance.f))
+
+###MSFT###
+# Set parameters
+p = 1
+h = 26
+T = length(rMSFT)
+
+# Split the return series into estimation and forecasting datasets
+Stock.est = rMSFT[1:(T-h)]
+W.MSFT.for = MSFT.RVw[(T-h+1):T]
+
+
+# Re-estimate the GJR-GARCH model using the estimation dataset
+garch.spec = ugarchspec(mean.model = list(armaOrder = c(p, 0), include.mean = TRUE),
+                                       variance.model = list(model = "gjrGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "std")
+garch.fit = ugarchfit(spec=garch.spec, data=Stock.est, solver = "solnp", solver.control = list(ftol_rel=1e-11,xtol_rel=1e-11, maxeval=10000))
+
+# Generate sigma forecasts for the GJR-GARCH model
+garch.fore = ugarchforecast(garch.fit, n.ahead = 26)
+sigma.f = sigma(garch.fore)
+variance.f = sigma.f^2
+
+# Calculate the RMFSE MAFE for the forecasted volatilities
+sqrt(mean((MSFT.RVw[1242:1267] - variance.f)^2))
+mean(abs(MSFT.RVw[1242:1267] - variance.f))
+
+###AMZN###
+# Set parameters
+p = 1
+h = 26
+T = length(rAMZN)
+
+# Split the return series into estimation and forecasting datasets
+Stock.est = rAMZN[1:(T-h)]
+W.AMZN.for = AMZN.RVw[(T-h+1):T]
+
+
+# Re-estimate the GJR-GARCH model using the estimation dataset
+garch.spec = ugarchspec(mean.model = list(armaOrder = c(p, 0), include.mean = TRUE, archm = TRUE),
+                                       variance.model = list(model = "gjrGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "std")
+garch.fit = ugarchfit(spec=garch.spec, data=Stock.est, solver = "solnp", solver.control = list(ftol_rel=1e-11,xtol_rel=1e-11, maxeval=10000))
+
+# Generate sigma forecasts for the GJR-GARCH model
+garch.fore = ugarchforecast(garch.fit, n.ahead = 26)
+sigma.f = sigma(garch.fore)
+variance.f = sigma.f^2
+
+# Calculate the RMFSE MAFE for the forecasted volatilities
+sqrt(mean((AMZN.RVw[1242:1267] - variance.f)^2))
+mean(abs(AMZN.RVw[1242:1267] - variance.f))
+
+###NVDA###
+# Set parameters
+p = 1
+h = 26
+T = length(rNVDA)
+
+# Split the return series into estimation and forecasting datasets
+Stock.est = rNVDA[1:(T-h)]
+W.NVDA.for = NVDA.RVw[(T-h+1):T]
+
+
+# Re-estimate the GJR-GARCH model using the estimation dataset
+garch.spec = ugarchspec(mean.model = list(armaOrder = c(p, 0), include.mean = TRUE, archm = TRUE),
+                                       variance.model = list(model = "gjrGARCH", garchOrder = c(2,2)),
+                                       distribution.model = "std")
+garch.fit = ugarchfit(spec=garch.spec, data=Stock.est, solver = "solnp", solver.control = list(ftol_rel=1e-11,xtol_rel=1e-11, maxeval=10000))
+
+# Generate sigma forecasts for the GJR-GARCH model
+garch.fore = ugarchforecast(garch.fit, n.ahead = 26)
+sigma.f = sigma(garch.fore)
+variance.f = sigma.f^2
+
+# Calculate the RMFSE MAFE for the forecasted volatilities
+sqrt(mean((NVDA.RVw[1242:1267] - variance.f)^2))
+mean(abs(NVDA.RVw[1242:1267] - variance.f))
+
+###BRKB###
+# Set parameters
+p = 1
+h = 26
+T = length(rBRK)
+
+# Split the return series into estimation and forecasting datasets
+Stock.est = rBRK[1:(T-h)]
+W.BRKB.for = BRK.RVw[(T-h+1):T]
+
+
+# Re-estimate the GJR-GARCH model using the estimation dataset
+garch.spec = ugarchspec(mean.model = list(armaOrder = c(p, 0), include.mean = TRUE),
+                                       variance.model = list(model = "gjrGARCH", garchOrder = c(3,3)),
+                                       distribution.model = "std")
+garch.fit = ugarchfit(spec=garch.spec, data=Stock.est, solver = "solnp", solver.control = list(ftol_rel=1e-11,xtol_rel=1e-11, maxeval=10000))
+
+# Generate sigma forecasts for the GJR-GARCH model
+garch.fore = ugarchforecast(garch.fit, n.ahead = 26)
+sigma.f = sigma(garch.fore)
+variance.f = sigma.f^2
+
+# Calculate the RMFSE MAFE for the forecasted volatilities
+sqrt(mean((BRK.RVw[1242:1267] - variance.f)^2))
+mean(abs(BRK.RVw[1242:1267] - variance.f))
+```
+
+To check the properties of the chosen models, residual diagnostics are conducted. The test statistics and p values are shown below:
+
++----------+--------------------------+----------------------+--------------------------+-------------------------------+----------------------+
+|          | AAPL:                    | MSFT:                | AMZN:                    | NVDA:                         | BRK-B:               |
+|          |                          |                      |                          |                               |                      |
+|          | AR(1) GJR-GARCH(3,1) std | AR(1) GJR-GARCH(1,1) | AR(1) GARCH In Mean(1,1) | AR(1) GARCH In Mean (1,1) std | AR(1) GJR-GARCH(1,1) |
++:========:+:========================:+:====================:+:========================:+:=============================:+:====================:+
+| Q(20)    | 20.752                   | 27.867               | 18.349                   | 14.448                        | 15.936               |
++----------+--------------------------+----------------------+--------------------------+-------------------------------+----------------------+
+| p-value  | 0.4119                   | 0.1126               | 0.5645                   | 0.8071                        | 0.7206               |
++----------+--------------------------+----------------------+--------------------------+-------------------------------+----------------------+
+| ARCH(20) | 8.562                    | 14.452               | 15.736                   | 9.367                         | 28.556               |
++----------+--------------------------+----------------------+--------------------------+-------------------------------+----------------------+
+| p-value  | 0.9874                   | 0.8068               | 0.7329                   | 0.9783                        | 0.09688              |
++----------+--------------------------+----------------------+--------------------------+-------------------------------+----------------------+
+
+All the chosen models do not have residual autocorrelation or heteroskedasticity at the 5% significance level. This highlights that the model captures the dynamics in the data sufficiently, suggesting that parameter estimates are unbiased and efficient.
+
+```{r estimate_GARCH}
+#| echo: false
+#| warning: false
+#| message: false
+#| output: false
+
+# Estimate gjrGARCH for AAPL
+AAPL.gjr.spec     = ugarchspec(mean.model = list(armaOrder=c(1, 0), include.mean = TRUE), 
+                                       variance.model = list(model = "gjrGARCH", garchOrder = c(3,1)),
+                                       distribution.model = "std")
+AAPL.gjr.est        = ugarchfit(spec=AAPL.gjr.spec, data=rAAPL, solver = "solnp")
+AAPL.gjr.est
+AutocorTest(as.vector(residuals(AAPL.gjr.est, standard=TRUE)), lag=20, type="Ljung-Box")
+AutocorTest(as.vector(residuals(AAPL.gjr.est, standard=TRUE))^2, lag=20, type="Ljung-Box")
+ArchTest(as.vector(residuals(AAPL.gjr.est, standard=TRUE)), lags=20)
+h_AAPL = sqrt(uncvariance(AAPL.gjr.est))*sqrt(52)
+h_AAPL
+
+##############################################################
+# Estimate GARCH in mean for MSFT
+MSFT.im.spec     = ugarchspec(mean.model = list(armaOrder=c(1, 0), include.mean = TRUE, archm=TRUE), 
+                                       variance.model = list(model = "gjrGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "norm")
+MSFT.im.est        = ugarchfit(spec=MSFT.im.spec, data=rMSFT, solver = "solnp")
+MSFT.im.est
+AutocorTest(as.vector(residuals(MSFT.im.est, standard=TRUE)), lag=20, type="Ljung-Box")
+AutocorTest(as.vector(residuals(MSFT.im.est, standard=TRUE))^2, lag=20, type="Ljung-Box")
+ArchTest(as.vector(residuals(MSFT.im.est, standard=TRUE)), lags=20)
+h_MSFT = sqrt(uncvariance(MSFT.im.est))*sqrt(52)
+h_MSFT
+
+##############################################################
+# Estimate GARCH in mean for AMZN
+AMZN.im.spec     = ugarchspec(mean.model = list(armaOrder=c(1, 0), include.mean = TRUE, archm=TRUE), 
+                                       variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "norm")
+AMZN.im.est        = ugarchfit(spec=AMZN.im.spec, data=rAMZN, solver = "solnp")
+AMZN.im.est
+AutocorTest(as.vector(residuals(AMZN.im.est, standard=TRUE)), lag=20, type="Ljung-Box")
+AutocorTest(as.vector(residuals(AMZN.im.est, standard=TRUE))^2, lag=20, type="Ljung-Box")
+ArchTest(as.vector(residuals(AMZN.im.est, standard=TRUE)), lags=20)
+h_AMZN = sqrt(uncvariance(AMZN.im.est))*sqrt(52)
+h_AMZN
+
+##############################################################
+# Estimate GJR-GARCH in mean for NVDA
+NVDA.im.spec     = ugarchspec(mean.model = list(armaOrder=c(1, 0), include.mean = TRUE, archm=TRUE), 
+                                       variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "std")
+NVDA.im.est        = ugarchfit(spec=NVDA.im.spec, data=rNVDA, solver = "solnp")
+NVDA.im.est
+AutocorTest(as.vector(residuals(NVDA.im.est, standard=TRUE)), lag=20, type="Ljung-Box")
+AutocorTest(as.vector(residuals(NVDA.im.est, standard=TRUE))^2, lag=20, type="Ljung-Box")
+ArchTest(as.vector(residuals(NVDA.im.est, standard=TRUE)), lags=20)
+h_NVDA = sqrt(uncvariance(NVDA.im.est))*sqrt(52)
+h_NVDA
+
+##############################################################
+# Estimate GARCH in mean for BRK
+BRK.im.spec     = ugarchspec(mean.model = list(armaOrder=c(1, 0), include.mean = TRUE), 
+                                       variance.model = list(model = "gjrGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "norm")
+BRK.im.est        = ugarchfit(spec=BRK.im.spec, data=rBRK, solver = "solnp")
+BRK.im.est
+AutocorTest(as.vector(residuals(BRK.im.est, standard=TRUE)), lag=20, type="Ljung-Box")
+AutocorTest(as.vector(residuals(BRK.im.est, standard=TRUE))^2, lag=20, type="Ljung-Box")
+ArchTest(as.vector(residuals(BRK.im.est, standard=TRUE)), lags=20)
+h_BRK = sqrt(uncvariance(BRK.im.est))*sqrt(52)
+h_BRK
+```
+
+```{r GARCH_AAPL_ex_post}
+#| echo: false
+#| message: false
+#| output: false
+#| eval: false
+h       = 26
+T       = length(rAAPL)
+rAAPL.est    = rAAPL[1:(T-h)]
+rAAPL.for    = rAAPL[(T-h+1):T]
+
+# Estimate the sGARCH for AAPL
+AAPL.gjr.spec    = ugarchspec(mean.model = list(armaOrder = c(0, 0), include.mean = TRUE),
+                                       variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "norm")
+AAPL.gjr.fit     = ugarchfit(spec=AAPL.gjr.spec, data=rAAPL.est, solver = "solnp")
+AAPL.gjr.for     = ugarchforecast(AAPL.gjr.fit, n.ahead = h)
+AAPL.gjr.f = fitted(AAPL.gjr.for)
+AAPL.gjr.sd.f  = sigma(AAPL.gjr.for)
+# Return performance of GARCH 
+mean(abs(rAAPL.for - AAPL.gjr.f))
+sqrt(mean((rAAPL.for - AAPL.gjr.f)^2))
+# Variance Performance of GARCH 
+mean(abs(AAPL.RVw[1242:1267] - (AAPL.gjr.sd.f)^2))
+sqrt(mean((AAPL.RVw[1242:1267] - (AAPL.gjr.sd.f)^2)^2))
+
+#########################################################################
+# Estimate the gjrGARCH for AAPL
+AAPL.gjr.spec    = ugarchspec(mean.model = list(armaOrder = c(3, 0), include.mean = TRUE),
+                                       variance.model = list(model = "gjrGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "norm")
+AAPL.gjr.fit     = ugarchfit(spec=AAPL.gjr.spec, data=rAAPL.est, solver = "solnp")
+AAPL.gjr.for     = ugarchforecast(AAPL.gjr.fit, n.ahead = h)
+AAPL.gjr.f = fitted(AAPL.gjr.for)
+AAPL.gjr.sd.f  = sigma(AAPL.gjr.for)
+# Return performance of GARCH 
+mean(abs(rAAPL.for - AAPL.gjr.f))
+sqrt(mean((rAAPL.for - AAPL.gjr.f)^2))
+# Variance Performance of GARCH 
+mean(abs(AAPL.RVw[1242:1267] - (AAPL.gjr.sd.f)^2))
+sqrt(mean((AAPL.RVw[1242:1267] - (AAPL.gjr.sd.f)^2)^2))
+
+#########################################################################
+# Estimate the GARCHim for AAPL
+AAPL.gjr.spec    = ugarchspec(mean.model = list(armaOrder = c(0, 0), archm=TRUE, include.mean = TRUE),
+                                       variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "norm")
+AAPL.gjr.fit     = ugarchfit(spec=AAPL.gjr.spec, data=rAAPL.est, solver = "solnp")
+AAPL.gjr.for     = ugarchforecast(AAPL.gjr.fit, n.ahead = h)
+AAPL.gjr.f = fitted(AAPL.gjr.for)
+AAPL.gjr.sd.f  = sigma(AAPL.gjr.for)
+# Return performance of GARCH 
+mean(abs(rAAPL.for - AAPL.gjr.f))
+sqrt(mean((rAAPL.for - AAPL.gjr.f)^2))
+# Variance Performance of GARCH 
+mean(abs(AAPL.RVw[1242:1267] - (AAPL.gjr.sd.f)^2))
+sqrt(mean((AAPL.RVw[1242:1267] - (AAPL.gjr.sd.f)^2)^2))
+
+#############################################################
+# Estimate the gjrGARCH in mean for AAPL
+AAPL.gjr.spec    = ugarchspec(mean.model = list(armaOrder = c(3, 0), include.mean = TRUE, archm=TRUE), variance.model = list(model = "gjrGARCH", garchOrder = c(1,1)), distribution.model = "norm")
+AAPL.gjr.fit     = ugarchfit(spec=AAPL.gjr.spec, data=rAAPL.est, solver = "solnp")
+AAPL.gjr.for     = ugarchforecast(AAPL.gjr.fit, n.ahead = h)
+AAPL.gjr.f = fitted(AAPL.gjr.for)
+AAPL.gjr.sd.f  = sigma(AAPL.gjr.for)
+# Return performance of GARCH 
+mean(abs(rAAPL.for - AAPL.gjr.f))
+sqrt(mean((rAAPL.for - AAPL.gjr.f)^2))
+# Performance of GARCH compared to realised volatility
+mean(abs(AAPL.RVw[1242:1267] - (AAPL.gjr.sd.f)^2))
+sqrt(mean((AAPL.RVw[1242:1267] - (AAPL.gjr.sd.f)^2)^2))
+```
+
+```{r GARCH_MSFT_ex_post}
+#| echo: false
+#| message: false
+#| output: false
+#| eval: false
+h       = 26
+T       = length(rMSFT)
+rMSFT.est    = rMSFT[1:(T-h)]
+rMSFT.for    = rMSFT[(T-h+1):T]
+
+# Estimate the sGARCH 
+MSFT.gjr.spec    = ugarchspec(mean.model = list(armaOrder = c(1, 0), include.mean = TRUE),
+                                       variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "norm")
+MSFT.gjr.fit     = ugarchfit(spec=MSFT.gjr.spec, data=rMSFT.est, solver = "solnp")
+MSFT.gjr.for     = ugarchforecast(MSFT.gjr.fit, n.ahead = h)
+MSFT.gjr.f = fitted(MSFT.gjr.for)
+MSFT.gjr.sd.f  = sigma(MSFT.gjr.for)
+# Return performance of GARCH 
+mean(abs(rMSFT.for - MSFT.gjr.f))
+sqrt(mean((rMSFT.for - MSFT.gjr.f)^2))
+# Variance Performance of GARCH 
+mean(abs(MSFT.RVw[1242:1267] - (MSFT.gjr.sd.f)^2))
+sqrt(mean((MSFT.RVw[1242:1267] - (MSFT.gjr.sd.f)^2)^2))
+
+#########################################################################
+# Estimate the gjrGARCH 
+MSFT.gjr.spec    = ugarchspec(mean.model = list(armaOrder = c(1, 0), include.mean = TRUE),
+                                       variance.model = list(model = "gjrGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "norm")
+MSFT.gjr.fit     = ugarchfit(spec=MSFT.gjr.spec, data=rMSFT.est, solver = "solnp")
+# Forecast 
+MSFT.gjr.for     = ugarchforecast(MSFT.gjr.fit, n.ahead = h)
+MSFT.gjr.f = fitted(MSFT.gjr.for)
+MSFT.gjr.sd.f  = sigma(MSFT.gjr.for)
+MSFT.gjr.v.f = MSFT.gjr.sd.f^2
+# Return performance of GARCH 
+mean(abs(rMSFT.for - MSFT.gjr.f))
+sqrt(mean((rMSFT.for - MSFT.gjr.f)^2))
+# Performance of GARCH 
+mean(abs(MSFT.RVw[1242:1267] - MSFT.gjr.v.f))
+sqrt(mean((MSFT.RVw[1242:1267] - MSFT.gjr.v.f)^2))
+
+#########################################################################
+# Estimate the GARCHim 
+MSFT.gjr.spec    = ugarchspec(mean.model = list(armaOrder = c(1, 0), include.mean = TRUE, archm = TRUE),
+                                       variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "norm")
+MSFT.gjr.fit     = ugarchfit(spec=MSFT.gjr.spec, data=rMSFT.est, solver = "solnp")
+# Forecast 
+MSFT.gjr.for     = ugarchforecast(MSFT.gjr.fit, n.ahead = h)
+MSFT.gjr.f = fitted(MSFT.gjr.for)
+MSFT.gjr.sd.f  = sigma(MSFT.gjr.for)
+MSFT.gjr.v.f = MSFT.gjr.sd.f^2
+# Return performance of GARCH 
+mean(abs(rMSFT.for - MSFT.gjr.f))
+sqrt(mean((rMSFT.for - MSFT.gjr.f)^2))
+# Performance of GARCH 
+mean(abs(MSFT.RVw[1242:1267] - MSFT.gjr.v.f))
+sqrt(mean((MSFT.RVw[1242:1267] - MSFT.gjr.v.f)^2))
+
+#############################################################
+# Estimate the gjrGARCH in mean 
+MSFT.gjr.spec    = ugarchspec(mean.model = list(armaOrder = c(1, 0), include.mean = TRUE, archm = TRUE),
+                                       variance.model = list(model = "gjrGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "norm")
+MSFT.gjr.fit     = ugarchfit(spec=MSFT.gjr.spec, data=rMSFT.est, solver = "solnp")
+# Forecast 
+MSFT.gjr.for     = ugarchforecast(MSFT.gjr.fit, n.ahead = h)
+MSFT.gjr.f = fitted(MSFT.gjr.for)
+MSFT.gjr.sd.f  = sigma(MSFT.gjr.for)
+MSFT.gjr.v.f = MSFT.gjr.sd.f^2
+# Return performance of GARCH 
+mean(abs(rMSFT.for - MSFT.gjr.f))
+sqrt(mean((rMSFT.for - MSFT.gjr.f)^2))
+# Performance of GARCH 
+mean(abs(MSFT.RVw[1242:1267] - MSFT.gjr.v.f))
+sqrt(mean((MSFT.RVw[1242:1267] - MSFT.gjr.v.f)^2))
+```
+
+```{r GARCH_AMZN_ex_post}
+#| echo: false
+#| message: false
+#| output: false
+#| eval: false
+h       = 26
+T       = length(rAMZN)
+rAMZN.est    = rAMZN[1:(T-h)]
+rAMZN.for    = rAMZN[(T-h+1):T]
+
+# Estimare sGARCH for AMZN
+AMZN.gjr.spec    = ugarchspec(mean.model = list(armaOrder = c(1, 0), include.mean = TRUE),
+                                       variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "std")
+AMZN.gjr.fit     = ugarchfit(spec=AMZN.gjr.spec, data=rAMZN.est, solver = "solnp")
+# Forecast 
+AMZN.gjr.for     = ugarchforecast(AMZN.gjr.fit, n.ahead = h)
+AMZN.gjr.f = fitted(AMZN.gjr.for)
+AMZN.gjr.sd.f  = sigma(AMZN.gjr.for)
+AMZN.gjr.v.f = AMZN.gjr.sd.f^2
+# Return performance of GARCH 
+mean(abs(rAMZN.for - AMZN.gjr.f))
+sqrt(mean((rAMZN.for - AMZN.gjr.f)^2))
+# Performance of GARCH 
+mean(abs(AMZN.RVw[1242:1267] - AMZN.gjr.v.f))
+sqrt(mean((AMZN.RVw[1242:1267] - AMZN.gjr.v.f)^2))
+infocriteria(AMZN.gjr.fit)[1]
+
+##############################################################
+# Estimare gjrGARCH for AMZN
+AMZN.gjr.spec    = ugarchspec(mean.model = list(armaOrder = c(1, 0), include.mean = TRUE),
+                                       variance.model = list(model = "gjrGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "std")
+AMZN.gjr.fit     = ugarchfit(spec=AMZN.gjr.spec, data=rAMZN.est, solver = "solnp")
+# Forecast 
+AMZN.gjr.for     = ugarchforecast(AMZN.gjr.fit, n.ahead = h)
+AMZN.gjr.f = fitted(AMZN.gjr.for)
+AMZN.gjr.sd.f  = sigma(AMZN.gjr.for)
+AMZN.gjr.v.f = AMZN.gjr.sd.f^2
+# Return performance of GARCH 
+mean(abs(rAMZN.for - AMZN.gjr.f))
+sqrt(mean((rAMZN.for - AMZN.gjr.f)^2))
+# Performance of GARCH 
+mean(abs(AMZN.RVw[1242:1267] - AMZN.gjr.v.f))
+sqrt(mean((AMZN.RVw[1242:1267] - AMZN.gjr.v.f)^2))
+infocriteria(AMZN.gjr.fit)[1]
+
+##############################################################
+# Estimate the garch in mean 
+AMZN.gjr.spec    = ugarchspec(mean.model = list(armaOrder = c(1, 0), include.mean = TRUE, archm=TRUE),
+                                       variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "std")
+AMZN.gjr.fit     = ugarchfit(spec=AMZN.gjr.spec, data=rAMZN.est, solver = "solnp")
+AMZN.gjr.for     = ugarchforecast(AMZN.gjr.fit, n.ahead = h)
+AMZN.gjr.f = fitted(AMZN.gjr.for)
+AMZN.gjr.sd.f  = sigma(AMZN.gjr.for)
+AMZN.gjr.v.f = AMZN.gjr.sd.f^2
+# Return performance of GARCH 
+mean(abs(rAMZN.for - AMZN.gjr.f))
+sqrt(mean((rAMZN.for - AMZN.gjr.f)^2))
+# Performance of GARCH compared to realised volatility
+mean(abs(AMZN.RVw[1242:1267] - AMZN.gjr.v.f))
+sqrt(mean((AMZN.RVw[1242:1267] - AMZN.gjr.v.f)^2))
+infocriteria(AMZN.gjr.fit)[1]
+
+##############################################################
+# Estimate the gjr garch in mean 
+AMZN.gjr.spec    = ugarchspec(mean.model = list(armaOrder = c(1, 0), include.mean = TRUE, archm=TRUE),
+                                       variance.model = list(model = "gjrGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "std")
+AMZN.gjr.fit     = ugarchfit(spec=AMZN.gjr.spec, data=rAMZN.est, solver = "solnp")
+AMZN.gjr.for     = ugarchforecast(AMZN.gjr.fit, n.ahead = h)
+AMZN.gjr.f = fitted(AMZN.gjr.for)
+AMZN.gjr.sd.f  = sigma(AMZN.gjr.for)
+AMZN.gjr.v.f = AMZN.gjr.sd.f^2
+# Return performance of GARCH 
+mean(abs(rAMZN.for - AMZN.gjr.f))
+sqrt(mean((rAMZN.for - AMZN.gjr.f)^2))
+# Performance of GARCH compared to realised volatility
+mean(abs(AMZN.RVw[1242:1267] - AMZN.gjr.v.f))
+sqrt(mean((AMZN.RVw[1242:1267] - AMZN.gjr.v.f)^2))
+infocriteria(AMZN.gjr.fit)[1]
+```
+
+```{r GARCH_NVDA_ex_post}
+#| echo: false
+#| message: false
+#| output: false
+#| eval: false
+h       = 26
+T       = length(rNVDA)
+rNVDA.est    = rNVDA[1:(T-h)]
+rNVDA.for    = rNVDA[(T-h+1):T]
+
+# Estimare sGARCH for NVDA
+NVDA.gjr.spec    = ugarchspec(mean.model = list(armaOrder = c(1, 0), include.mean = TRUE),
+                                       variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "norm")
+NVDA.gjr.fit     = ugarchfit(spec=NVDA.gjr.spec, data=rNVDA.est, solver = "solnp")
+# Forecast 
+NVDA.gjr.for     = ugarchforecast(NVDA.gjr.fit, n.ahead = h)
+NVDA.gjr.f = fitted(NVDA.gjr.for)
+NVDA.gjr.sd.f  = sigma(NVDA.gjr.for)
+NVDA.gjr.v.f = NVDA.gjr.sd.f^2
+# Return performance of GARCH 
+mean(abs(rNVDA.for - NVDA.gjr.f))
+sqrt(mean((rNVDA.for - NVDA.gjr.f)^2))
+# Performance of GARCH 
+mean(abs(NVDA.RVw[1242:1267] - NVDA.gjr.v.f))
+sqrt(mean((NVDA.RVw[1242:1267] - NVDA.gjr.v.f)^2))
+infocriteria(NVDA.gjr.fit)[1]
+
+#########################################################################
+# Estimare gjrGARCH for NVDA
+NVDA.gjr.spec    = ugarchspec(mean.model = list(armaOrder = c(1, 0), include.mean = TRUE),
+                                       variance.model = list(model = "gjrGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "norm")
+NVDA.gjr.fit     = ugarchfit(spec=NVDA.gjr.spec, data=rNVDA.est, solver = "solnp")
+# Forecast 
+NVDA.gjr.for     = ugarchforecast(NVDA.gjr.fit, n.ahead = h)
+NVDA.gjr.f = fitted(NVDA.gjr.for)
+NVDA.gjr.sd.f  = sigma(NVDA.gjr.for)
+NVDA.gjr.v.f = NVDA.gjr.sd.f^2
+# Return performance of GARCH 
+mean(abs(rNVDA.for - NVDA.gjr.f))
+sqrt(mean((rNVDA.for - NVDA.gjr.f)^2))
+# Performance of GARCH 
+mean(abs(NVDA.RVw[1242:1267] - NVDA.gjr.v.f))
+sqrt(mean((NVDA.RVw[1242:1267] - NVDA.gjr.v.f)^2))
+infocriteria(NVDA.gjr.fit)[1]
+
+##############################################################
+# Estimate the GARCHim
+NVDA.gjr.spec    = ugarchspec(mean.model = list(armaOrder = c(1, 0), include.mean = TRUE, archm=TRUE),
+                                       variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "norm")
+NVDA.gjr.fit     = ugarchfit(spec=NVDA.gjr.spec, data=rNVDA.est, solver = "solnp")
+# Forecast 
+NVDA.gjr.for     = ugarchforecast(NVDA.gjr.fit, n.ahead = h)
+NVDA.gjr.f = fitted(NVDA.gjr.for)
+NVDA.gjr.sd.f  = sigma(NVDA.gjr.for)
+NVDA.gjr.v.f = NVDA.gjr.sd.f^2
+# Return performance of GARCH 
+mean(abs(rNVDA.for - NVDA.gjr.f))
+sqrt(mean((rNVDA.for - NVDA.gjr.f)^2))
+# Performance of GARCH 
+mean(abs(NVDA.RVw[1242:1267] - NVDA.gjr.v.f))
+sqrt(mean((NVDA.RVw[1242:1267] - NVDA.gjr.v.f)^2))
+infocriteria(NVDA.gjr.fit)[1]
+
+##############################################################
+# Estimate the gjr GARCHim
+NVDA.gjr.spec    = ugarchspec(mean.model = list(armaOrder = c(1, 0), include.mean = TRUE, archm=TRUE),
+                                       variance.model = list(model = "gjrGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "norm")
+NVDA.gjr.fit     = ugarchfit(spec=NVDA.gjr.spec, data=rNVDA.est, solver = "solnp")
+# Forecast 
+NVDA.gjr.for     = ugarchforecast(NVDA.gjr.fit, n.ahead = h)
+NVDA.gjr.f = fitted(NVDA.gjr.for)
+NVDA.gjr.sd.f  = sigma(NVDA.gjr.for)
+NVDA.gjr.v.f = NVDA.gjr.sd.f^2
+# Return performance of GARCH 
+mean(abs(rNVDA.for - NVDA.gjr.f))
+sqrt(mean((rNVDA.for - NVDA.gjr.f)^2))
+# Performance of GARCH 
+mean(abs(NVDA.RVw[1242:1267] - NVDA.gjr.v.f))
+sqrt(mean((NVDA.RVw[1242:1267] - NVDA.gjr.v.f)^2))
+infocriteria(NVDA.gjr.fit)[1]
+```
+
+```{r GARCH_BRK_ex_post}
+#| echo: false
+#| message: false
+#| output: false
+#| eval: false
+h       = 26
+T       = length(rBRK)
+rBRK.est    = rBRK[1:(T-h)]
+rBRK.for    = rBRK[(T-h+1):T]
+
+# Estimare sGARCH for BRK
+BRK.gjr.spec    = ugarchspec(mean.model = list(armaOrder = c(1, 0), include.mean = TRUE),
+                                       variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "norm")
+BRK.gjr.fit     = ugarchfit(spec=BRK.gjr.spec, data=rBRK.est, solver = "solnp")
+# Forecast 
+BRK.gjr.for     = ugarchforecast(BRK.gjr.fit, n.ahead = h)
+BRK.gjr.f = fitted(BRK.gjr.for)
+BRK.gjr.sd.f  = sigma(BRK.gjr.for)
+BRK.gjr.v.f = BRK.gjr.sd.f^2
+# Return performance of GARCH 
+mean(abs(rBRK.for - BRK.gjr.f))
+sqrt(mean((rBRK.for - BRK.gjr.f)^2))
+# Performance of GARCH 
+mean(abs(BRK.RVw[1242:1267] - BRK.gjr.v.f))
+sqrt(mean((BRK.RVw[1242:1267] - BRK.gjr.v.f)^2))
+infocriteria(BRK.gjr.fit)[1]
+
+#########################################################################
+# Estimare gjrGARCH for BRK
+BRK.gjr.spec    = ugarchspec(mean.model = list(armaOrder = c(1, 0), include.mean = TRUE),
+                                       variance.model = list(model = "gjrGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "norm")
+BRK.gjr.fit     = ugarchfit(spec=BRK.gjr.spec, data=rBRK.est, solver = "solnp")
+# Forecast 
+BRK.gjr.for     = ugarchforecast(BRK.gjr.fit, n.ahead = h)
+BRK.gjr.f = fitted(BRK.gjr.for)
+BRK.gjr.sd.f  = sigma(BRK.gjr.for)
+BRK.gjr.v.f = BRK.gjr.sd.f^2
+# Return performance of GARCH 
+mean(abs(rBRK.for - BRK.gjr.f))
+sqrt(mean((rBRK.for - BRK.gjr.f)^2))
+# Performance of GARCH 
+mean(abs(BRK.RVw[1242:1267] - BRK.gjr.v.f))
+sqrt(mean((BRK.RVw[1242:1267] - BRK.gjr.v.f)^2))
+infocriteria(BRK.gjr.fit)[1]
+
+#########################################################################
+# Estimare sGARCH for BRK
+BRK.gjr.spec    = ugarchspec(mean.model = list(armaOrder = c(1, 0), include.mean = TRUE, archm=TRUE),
+                                       variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "norm")
+BRK.gjr.fit     = ugarchfit(spec=BRK.gjr.spec, data=rBRK.est, solver = "solnp")
+# Forecast 
+BRK.gjr.for     = ugarchforecast(BRK.gjr.fit, n.ahead = h)
+BRK.gjr.f = fitted(BRK.gjr.for)
+BRK.gjr.sd.f  = sigma(BRK.gjr.for)
+BRK.gjr.v.f = BRK.gjr.sd.f^2
+# Return performance of GARCH 
+mean(abs(rBRK.for - BRK.gjr.f))
+sqrt(mean((rBRK.for - BRK.gjr.f)^2))
+# Performance of GARCH 
+mean(abs(BRK.RVw[1242:1267] - BRK.gjr.v.f))
+sqrt(mean((BRK.RVw[1242:1267] - BRK.gjr.v.f)^2))
+infocriteria(BRK.gjr.fit)[1]
+
+#########################################################################
+# Estimare sGARCH for BRK
+BRK.gjr.spec    = ugarchspec(mean.model = list(armaOrder = c(1, 0), include.mean = TRUE, archm=TRUE),
+                                       variance.model = list(model = "gjrGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "norm")
+BRK.gjr.fit     = ugarchfit(spec=BRK.gjr.spec, data=rBRK.est, solver = "solnp")
+# Forecast 
+BRK.gjr.for     = ugarchforecast(BRK.gjr.fit, n.ahead = h)
+BRK.gjr.f = fitted(BRK.gjr.for)
+BRK.gjr.sd.f  = sigma(BRK.gjr.for)
+BRK.gjr.v.f = BRK.gjr.sd.f^2
+# Return performance of GARCH 
+mean(abs(rBRK.for - BRK.gjr.f))
+sqrt(mean((rBRK.for - BRK.gjr.f)^2))
+# Performance of GARCH 
+mean(abs(BRK.RVw[1242:1267] - BRK.gjr.v.f))
+sqrt(mean((BRK.RVw[1242:1267] - BRK.gjr.v.f)^2))
+infocriteria(BRK.gjr.fit)[1]
+```
+
+```{r GARCH_AAPL_std_ex_post}
+#| echo: false
+#| message: false
+#| output: false
+#| eval: false
+h       = 26
+T       = length(rAAPL)
+rAAPL.est    = rAAPL[1:(T-h)]
+rAAPL.for    = rAAPL[(T-h+1):T]
+
+# Estimate the sGARCH for AAPL
+AAPL.gjr.spec    = ugarchspec(mean.model = list(armaOrder = c(0, 0), include.mean = TRUE),
+                                       variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "std")
+AAPL.gjr.fit     = ugarchfit(spec=AAPL.gjr.spec, data=rAAPL.est, solver = "solnp")
+AAPL.gjr.for     = ugarchforecast(AAPL.gjr.fit, n.ahead = h)
+AAPL.gjr.f = fitted(AAPL.gjr.for)
+AAPL.gjr.sd.f  = sigma(AAPL.gjr.for)
+# Return performance of GARCH 
+mean(abs(rAAPL.for - AAPL.gjr.f))
+sqrt(mean((rAAPL.for - AAPL.gjr.f)^2))
+# Variance Performance of GARCH 
+mean(abs(AAPL.RVw[1242:1267] - (AAPL.gjr.sd.f)^2))
+sqrt(mean((AAPL.RVw[1242:1267] - (AAPL.gjr.sd.f)^2)^2))
+
+#########################################################################
+# Estimate the gjrGARCH for AAPL
+AAPL.gjr.spec    = ugarchspec(mean.model = list(armaOrder = c(3, 0), include.mean = TRUE),
+                                       variance.model = list(model = "gjrGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "std")
+AAPL.gjr.fit     = ugarchfit(spec=AAPL.gjr.spec, data=rAAPL.est, solver = "solnp")
+AAPL.gjr.for     = ugarchforecast(AAPL.gjr.fit, n.ahead = h)
+AAPL.gjr.f = fitted(AAPL.gjr.for)
+AAPL.gjr.sd.f  = sigma(AAPL.gjr.for)
+# Return performance of GARCH 
+mean(abs(rAAPL.for - AAPL.gjr.f))
+sqrt(mean((rAAPL.for - AAPL.gjr.f)^2))
+# Variance Performance of GARCH 
+mean(abs(AAPL.RVw[1242:1267] - (AAPL.gjr.sd.f)^2))
+sqrt(mean((AAPL.RVw[1242:1267] - (AAPL.gjr.sd.f)^2)^2))
+
+#########################################################################
+# Estimate the GARCHim for AAPL
+AAPL.gjr.spec    = ugarchspec(mean.model = list(armaOrder = c(0, 0), archm=TRUE, include.mean = TRUE),
+                                       variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "std")
+AAPL.gjr.fit     = ugarchfit(spec=AAPL.gjr.spec, data=rAAPL.est, solver = "solnp")
+AAPL.gjr.for     = ugarchforecast(AAPL.gjr.fit, n.ahead = h)
+AAPL.gjr.f = fitted(AAPL.gjr.for)
+AAPL.gjr.sd.f  = sigma(AAPL.gjr.for)
+# Return performance of GARCH 
+mean(abs(rAAPL.for - AAPL.gjr.f))
+sqrt(mean((rAAPL.for - AAPL.gjr.f)^2))
+# Variance Performance of GARCH 
+mean(abs(AAPL.RVw[1242:1267] - (AAPL.gjr.sd.f)^2))
+sqrt(mean((AAPL.RVw[1242:1267] - (AAPL.gjr.sd.f)^2)^2))
+
+#############################################################
+# Estimate the gjrGARCH in mean for AAPL
+AAPL.gjr.spec    = ugarchspec(mean.model = list(armaOrder = c(3, 0), include.mean = TRUE, archm=TRUE),
+                                       variance.model = list(model = "gjrGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "std")
+AAPL.gjr.fit     = ugarchfit(spec=AAPL.gjr.spec, data=rAAPL.est, solver = "solnp")
+AAPL.gjr.for     = ugarchforecast(AAPL.gjr.fit, n.ahead = h)
+AAPL.gjr.f = fitted(AAPL.gjr.for)
+AAPL.gjr.sd.f  = sigma(AAPL.gjr.for)
+# Return performance of GARCH 
+mean(abs(rAAPL.for - AAPL.gjr.f))
+sqrt(mean((rAAPL.for - AAPL.gjr.f)^2))
+# Performance of GARCH compared to realised volatility
+mean(abs(AAPL.RVw[1242:1267] - (AAPL.gjr.sd.f)^2))
+sqrt(mean((AAPL.RVw[1242:1267] - (AAPL.gjr.sd.f)^2)^2))
+```
+
+```{r GARCH_MSFT_std_ex_post}
+#| echo: false
+#| message: false
+#| output: false
+#| eval: false
+h       = 26
+T       = length(rMSFT)
+rMSFT.est    = rMSFT[1:(T-h)]
+rMSFT.for    = rMSFT[(T-h+1):T]
+
+# Estimate the sGARCH 
+MSFT.gjr.spec    = ugarchspec(mean.model = list(armaOrder = c(1, 0), include.mean = TRUE),
+                                       variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "std")
+MSFT.gjr.fit     = ugarchfit(spec=MSFT.gjr.spec, data=rMSFT.est, solver = "solnp")
+MSFT.gjr.for     = ugarchforecast(MSFT.gjr.fit, n.ahead = h)
+MSFT.gjr.f = fitted(MSFT.gjr.for)
+MSFT.gjr.sd.f  = sigma(MSFT.gjr.for)
+# Return performance of GARCH 
+mean(abs(rMSFT.for - MSFT.gjr.f))
+sqrt(mean((rMSFT.for - MSFT.gjr.f)^2))
+# Variance Performance of GARCH 
+mean(abs(MSFT.RVw[1242:1267] - (MSFT.gjr.sd.f)^2))
+sqrt(mean((MSFT.RVw[1242:1267] - (MSFT.gjr.sd.f)^2)^2))
+
+#########################################################################
+# Estimate the gjrGARCH 
+MSFT.gjr.spec    = ugarchspec(mean.model = list(armaOrder = c(1, 0), include.mean = TRUE),
+                                       variance.model = list(model = "gjrGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "std")
+MSFT.gjr.fit     = ugarchfit(spec=MSFT.gjr.spec, data=rMSFT.est, solver = "solnp")
+# Forecast 
+MSFT.gjr.for     = ugarchforecast(MSFT.gjr.fit, n.ahead = h)
+MSFT.gjr.f = fitted(MSFT.gjr.for)
+MSFT.gjr.sd.f  = sigma(MSFT.gjr.for)
+MSFT.gjr.v.f = MSFT.gjr.sd.f^2
+# Return performance of GARCH 
+mean(abs(rMSFT.for - MSFT.gjr.f))
+sqrt(mean((rMSFT.for - MSFT.gjr.f)^2))
+# Performance of GARCH 
+mean(abs(MSFT.RVw[1242:1267] - MSFT.gjr.v.f))
+sqrt(mean((MSFT.RVw[1242:1267] - MSFT.gjr.v.f)^2))
+
+#########################################################################
+# Estimate the GARCHim 
+MSFT.gjr.spec    = ugarchspec(mean.model = list(armaOrder = c(1, 0), include.mean = TRUE, archm = TRUE),
+                                       variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "std")
+MSFT.gjr.fit     = ugarchfit(spec=MSFT.gjr.spec, data=rMSFT.est, solver = "solnp")
+# Forecast 
+MSFT.gjr.for     = ugarchforecast(MSFT.gjr.fit, n.ahead = h)
+MSFT.gjr.f = fitted(MSFT.gjr.for)
+MSFT.gjr.sd.f  = sigma(MSFT.gjr.for)
+MSFT.gjr.v.f = MSFT.gjr.sd.f^2
+# Return performance of GARCH 
+mean(abs(rMSFT.for - MSFT.gjr.f))
+sqrt(mean((rMSFT.for - MSFT.gjr.f)^2))
+# Performance of GARCH 
+mean(abs(MSFT.RVw[1242:1267] - MSFT.gjr.v.f))
+sqrt(mean((MSFT.RVw[1242:1267] - MSFT.gjr.v.f)^2))
+
+#############################################################
+# Estimate the gjrGARCH in mean 
+MSFT.gjr.spec    = ugarchspec(mean.model = list(armaOrder = c(1, 0), include.mean = TRUE, archm = TRUE),
+                                       variance.model = list(model = "gjrGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "std")
+MSFT.gjr.fit     = ugarchfit(spec=MSFT.gjr.spec, data=rMSFT.est, solver = "solnp")
+# Forecast 
+MSFT.gjr.for     = ugarchforecast(MSFT.gjr.fit, n.ahead = h)
+MSFT.gjr.f = fitted(MSFT.gjr.for)
+MSFT.gjr.sd.f  = sigma(MSFT.gjr.for)
+MSFT.gjr.v.f = MSFT.gjr.sd.f^2
+# Return performance of GARCH 
+mean(abs(rMSFT.for - MSFT.gjr.f))
+sqrt(mean((rMSFT.for - MSFT.gjr.f)^2))
+# Performance of GARCH 
+mean(abs(MSFT.RVw[1242:1267] - MSFT.gjr.v.f))
+sqrt(mean((MSFT.RVw[1242:1267] - MSFT.gjr.v.f)^2))
+```
+
+```{r GARCH_NVDA_std_ex_post}
+#| echo: false
+#| message: false
+#| output: false
+#| eval: false
+h       = 26
+T       = length(rNVDA)
+rNVDA.est    = rNVDA[1:(T-h)]
+rNVDA.for    = rNVDA[(T-h+1):T]
+
+# Estimare sGARCH for NVDA
+NVDA.gjr.spec    = ugarchspec(mean.model = list(armaOrder = c(1, 0), include.mean = TRUE),
+                                       variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "std")
+NVDA.gjr.fit     = ugarchfit(spec=NVDA.gjr.spec, data=rNVDA.est, solver = "solnp")
+# Forecast 
+NVDA.gjr.for     = ugarchforecast(NVDA.gjr.fit, n.ahead = h)
+NVDA.gjr.f = fitted(NVDA.gjr.for)
+NVDA.gjr.sd.f  = sigma(NVDA.gjr.for)
+NVDA.gjr.v.f = NVDA.gjr.sd.f^2
+# Return performance of GARCH 
+mean(abs(rNVDA.for - NVDA.gjr.f))
+sqrt(mean((rNVDA.for - NVDA.gjr.f)^2))
+# Performance of GARCH 
+mean(abs(NVDA.RVw[1242:1267] - NVDA.gjr.v.f))
+sqrt(mean((NVDA.RVw[1242:1267] - NVDA.gjr.v.f)^2))
+infocriteria(NVDA.gjr.fit)[1]
+
+#########################################################################
+# Estimare gjrGARCH for NVDA
+NVDA.gjr.spec    = ugarchspec(mean.model = list(armaOrder = c(1, 0), include.mean = TRUE),
+                                       variance.model = list(model = "gjrGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "std")
+NVDA.gjr.fit     = ugarchfit(spec=NVDA.gjr.spec, data=rNVDA.est, solver = "solnp")
+# Forecast 
+NVDA.gjr.for     = ugarchforecast(NVDA.gjr.fit, n.ahead = h)
+NVDA.gjr.f = fitted(NVDA.gjr.for)
+NVDA.gjr.sd.f  = sigma(NVDA.gjr.for)
+NVDA.gjr.v.f = NVDA.gjr.sd.f^2
+# Return performance of GARCH 
+mean(abs(rNVDA.for - NVDA.gjr.f))
+sqrt(mean((rNVDA.for - NVDA.gjr.f)^2))
+# Performance of GARCH 
+mean(abs(NVDA.RVw[1242:1267] - NVDA.gjr.v.f))
+sqrt(mean((NVDA.RVw[1242:1267] - NVDA.gjr.v.f)^2))
+infocriteria(NVDA.gjr.fit)[1]
+
+##############################################################
+# Estimate the GARCHim
+NVDA.gjr.spec    = ugarchspec(mean.model = list(armaOrder = c(1, 0), include.mean = TRUE, archm=TRUE),
+                                       variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "std")
+NVDA.gjr.fit     = ugarchfit(spec=NVDA.gjr.spec, data=rNVDA.est, solver = "solnp")
+# Forecast 
+NVDA.gjr.for     = ugarchforecast(NVDA.gjr.fit, n.ahead = h)
+NVDA.gjr.f = fitted(NVDA.gjr.for)
+NVDA.gjr.sd.f  = sigma(NVDA.gjr.for)
+NVDA.gjr.v.f = NVDA.gjr.sd.f^2
+# Return performance of GARCH 
+mean(abs(rNVDA.for - NVDA.gjr.f))
+sqrt(mean((rNVDA.for - NVDA.gjr.f)^2))
+# Performance of GARCH 
+mean(abs(NVDA.RVw[1242:1267] - NVDA.gjr.v.f))
+sqrt(mean((NVDA.RVw[1242:1267] - NVDA.gjr.v.f)^2))
+infocriteria(NVDA.gjr.fit)[1]
+
+##############################################################
+# Estimate the gjr GARCHim
+NVDA.gjr.spec    = ugarchspec(mean.model = list(armaOrder = c(1, 0), include.mean = TRUE, archm=TRUE),
+                                       variance.model = list(model = "gjrGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "std")
+NVDA.gjr.fit     = ugarchfit(spec=NVDA.gjr.spec, data=rNVDA.est, solver = "solnp")
+# Forecast 
+NVDA.gjr.for     = ugarchforecast(NVDA.gjr.fit, n.ahead = h)
+NVDA.gjr.f = fitted(NVDA.gjr.for)
+NVDA.gjr.sd.f  = sigma(NVDA.gjr.for)
+NVDA.gjr.v.f = NVDA.gjr.sd.f^2
+# Return performance of GARCH 
+mean(abs(rNVDA.for - NVDA.gjr.f))
+sqrt(mean((rNVDA.for - NVDA.gjr.f)^2))
+# Performance of GARCH 
+mean(abs(NVDA.RVw[1242:1267] - NVDA.gjr.v.f))
+sqrt(mean((NVDA.RVw[1242:1267] - NVDA.gjr.v.f)^2))
+infocriteria(NVDA.gjr.fit)[1]
+```
+
+```{r GARCH_AMZN_Std_ex_post}
+#| echo: false
+#| message: false
+#| output: false
+#| eval: false
+h       = 26
+T       = length(rAMZN)
+rAMZN.est    = rAMZN[1:(T-h)]
+rAMZN.for    = rAMZN[(T-h+1):T]
+
+# Estimare sGARCH for AMZN
+AMZN.gjr.spec    = ugarchspec(mean.model = list(armaOrder = c(1, 0), include.mean = TRUE),
+                                       variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "std")
+AMZN.gjr.fit     = ugarchfit(spec=AMZN.gjr.spec, data=rAMZN.est, solver = "solnp")
+# Forecast 
+AMZN.gjr.for     = ugarchforecast(AMZN.gjr.fit, n.ahead = h)
+AMZN.gjr.f = fitted(AMZN.gjr.for)
+AMZN.gjr.sd.f  = sigma(AMZN.gjr.for)
+AMZN.gjr.v.f = AMZN.gjr.sd.f^2
+# Return performance of GARCH 
+mean(abs(rAMZN.for - AMZN.gjr.f))
+sqrt(mean((rAMZN.for - AMZN.gjr.f)^2))
+# Performance of GARCH 
+mean(abs(AMZN.RVw[1242:1267] - AMZN.gjr.v.f))
+sqrt(mean((AMZN.RVw[1242:1267] - AMZN.gjr.v.f)^2))
+infocriteria(AMZN.gjr.fit)[1]
+
+##############################################################
+# Estimare gjrGARCH for AMZN
+AMZN.gjr.spec    = ugarchspec(mean.model = list(armaOrder = c(1, 0), include.mean = TRUE),
+                                       variance.model = list(model = "gjrGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "std")
+AMZN.gjr.fit     = ugarchfit(spec=AMZN.gjr.spec, data=rAMZN.est, solver = "solnp")
+# Forecast 
+AMZN.gjr.for     = ugarchforecast(AMZN.gjr.fit, n.ahead = h)
+AMZN.gjr.f = fitted(AMZN.gjr.for)
+AMZN.gjr.sd.f  = sigma(AMZN.gjr.for)
+AMZN.gjr.v.f = AMZN.gjr.sd.f^2
+# Return performance of GARCH 
+mean(abs(rAMZN.for - AMZN.gjr.f))
+sqrt(mean((rAMZN.for - AMZN.gjr.f)^2))
+# Performance of GARCH 
+mean(abs(AMZN.RVw[1242:1267] - AMZN.gjr.v.f))
+sqrt(mean((AMZN.RVw[1242:1267] - AMZN.gjr.v.f)^2))
+infocriteria(AMZN.gjr.fit)[1]
+
+##############################################################
+# Estimate the garch in mean 
+AMZN.gjr.spec    = ugarchspec(mean.model = list(armaOrder = c(1, 0), include.mean = TRUE, archm=TRUE),
+                                       variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "std")
+AMZN.gjr.fit     = ugarchfit(spec=AMZN.gjr.spec, data=rAMZN.est, solver = "solnp")
+AMZN.gjr.for     = ugarchforecast(AMZN.gjr.fit, n.ahead = h)
+AMZN.gjr.f = fitted(AMZN.gjr.for)
+AMZN.gjr.sd.f  = sigma(AMZN.gjr.for)
+AMZN.gjr.v.f = AMZN.gjr.sd.f^2
+# Return performance of GARCH 
+mean(abs(rAMZN.for - AMZN.gjr.f))
+sqrt(mean((rAMZN.for - AMZN.gjr.f)^2))
+# Performance of GARCH compared to realised volatility
+mean(abs(AMZN.RVw[1242:1267] - AMZN.gjr.v.f))
+sqrt(mean((AMZN.RVw[1242:1267] - AMZN.gjr.v.f)^2))
+infocriteria(AMZN.gjr.fit)[1]
+
+##############################################################
+# Estimate the gjr garch in mean 
+AMZN.gjr.spec    = ugarchspec(mean.model = list(armaOrder = c(1, 0), include.mean = TRUE, archm=TRUE),
+                                       variance.model = list(model = "gjrGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "std")
+AMZN.gjr.fit     = ugarchfit(spec=AMZN.gjr.spec, data=rAMZN.est, solver = "solnp")
+AMZN.gjr.for     = ugarchforecast(AMZN.gjr.fit, n.ahead = h)
+AMZN.gjr.f = fitted(AMZN.gjr.for)
+AMZN.gjr.sd.f  = sigma(AMZN.gjr.for)
+AMZN.gjr.v.f = AMZN.gjr.sd.f^2
+# Return performance of GARCH 
+mean(abs(rAMZN.for - AMZN.gjr.f))
+sqrt(mean((rAMZN.for - AMZN.gjr.f)^2))
+# Performance of GARCH compared to realised volatility
+mean(abs(AMZN.RVw[1242:1267] - AMZN.gjr.v.f))
+sqrt(mean((AMZN.RVw[1242:1267] - AMZN.gjr.v.f)^2))
+infocriteria(AMZN.gjr.fit)[1]
+```
+
+```{r GARCH_BRK_STD_EX_POST}
+#| echo: false
+#| message: false
+#| output: false
+#| eval: false
+h       = 26
+T       = length(rBRK)
+rBRK.est    = rBRK[1:(T-h)]
+rBRK.for    = rBRK[(T-h+1):T]
+
+# Estimare sGARCH for BRK
+BRK.gjr.spec    = ugarchspec(mean.model = list(armaOrder = c(1, 0), include.mean = TRUE),
+                                       variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "std")
+BRK.gjr.fit     = ugarchfit(spec=BRK.gjr.spec, data=rBRK.est, solver = "solnp")
+# Forecast 
+BRK.gjr.for     = ugarchforecast(BRK.gjr.fit, n.ahead = h)
+BRK.gjr.f = fitted(BRK.gjr.for)
+BRK.gjr.sd.f  = sigma(BRK.gjr.for)
+BRK.gjr.v.f = BRK.gjr.sd.f^2
+# Return performance of GARCH 
+mean(abs(rBRK.for - BRK.gjr.f))
+sqrt(mean((rBRK.for - BRK.gjr.f)^2))
+# Performance of GARCH 
+mean(abs(BRK.RVw[1242:1267] - BRK.gjr.v.f))
+sqrt(mean((BRK.RVw[1242:1267] - BRK.gjr.v.f)^2))
+infocriteria(BRK.gjr.fit)[1]
+
+#########################################################################
+# Estimare gjrGARCH for BRK
+BRK.gjr.spec    = ugarchspec(mean.model = list(armaOrder = c(1, 0), include.mean = TRUE),
+                                       variance.model = list(model = "gjrGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "std")
+BRK.gjr.fit     = ugarchfit(spec=BRK.gjr.spec, data=rBRK.est, solver = "solnp")
+# Forecast 
+BRK.gjr.for     = ugarchforecast(BRK.gjr.fit, n.ahead = h)
+BRK.gjr.f = fitted(BRK.gjr.for)
+BRK.gjr.sd.f  = sigma(BRK.gjr.for)
+BRK.gjr.v.f = BRK.gjr.sd.f^2
+# Return performance of GARCH 
+mean(abs(rBRK.for - BRK.gjr.f))
+sqrt(mean((rBRK.for - BRK.gjr.f)^2))
+# Performance of GARCH 
+mean(abs(BRK.RVw[1242:1267] - BRK.gjr.v.f))
+sqrt(mean((BRK.RVw[1242:1267] - BRK.gjr.v.f)^2))
+infocriteria(BRK.gjr.fit)[1]
+
+#########################################################################
+# Estimare sGARCH for BRK
+BRK.gjr.spec    = ugarchspec(mean.model = list(armaOrder = c(1, 0), include.mean = TRUE, archm=TRUE),
+                                       variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "std")
+BRK.gjr.fit     = ugarchfit(spec=BRK.gjr.spec, data=rBRK.est, solver = "solnp")
+# Forecast 
+BRK.gjr.for     = ugarchforecast(BRK.gjr.fit, n.ahead = h)
+BRK.gjr.f = fitted(BRK.gjr.for)
+BRK.gjr.sd.f  = sigma(BRK.gjr.for)
+BRK.gjr.v.f = BRK.gjr.sd.f^2
+# Return performance of GARCH 
+mean(abs(rBRK.for - BRK.gjr.f))
+sqrt(mean((rBRK.for - BRK.gjr.f)^2))
+# Performance of GARCH 
+mean(abs(BRK.RVw[1242:1267] - BRK.gjr.v.f))
+sqrt(mean((BRK.RVw[1242:1267] - BRK.gjr.v.f)^2))
+infocriteria(BRK.gjr.fit)[1]
+
+#########################################################################
+# Estimare sGARCH for BRK
+BRK.gjr.spec    = ugarchspec(mean.model = list(armaOrder = c(1, 0), include.mean = TRUE, archm=TRUE),
+                                       variance.model = list(model = "gjrGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "std")
+BRK.gjr.fit     = ugarchfit(spec=BRK.gjr.spec, data=rBRK.est, solver = "solnp")
+# Forecast 
+BRK.gjr.for     = ugarchforecast(BRK.gjr.fit, n.ahead = h)
+BRK.gjr.f = fitted(BRK.gjr.for)
+BRK.gjr.sd.f  = sigma(BRK.gjr.for)
+BRK.gjr.v.f = BRK.gjr.sd.f^2
+# Return performance of GARCH 
+mean(abs(rBRK.for - BRK.gjr.f))
+sqrt(mean((rBRK.for - BRK.gjr.f)^2))
+# Performance of GARCH 
+mean(abs(BRK.RVw[1242:1267] - BRK.gjr.v.f))
+sqrt(mean((BRK.RVw[1242:1267] - BRK.gjr.v.f)^2))
+infocriteria(BRK.gjr.fit)[1]
+```
+
+## HAR Model
+
+Given that data on weekly realised volatility is available, another model that can be used for volatility forecasting is the Heterogeneous Autoregressive (HAR) model. However, as the original model uses daily realised volatility, we modified it as follows to accommodate weekly realised volatility:
+
+```{=tex}
+\vspace{-20pt}
+\begin{align}
+RV_{t}^{(w)} &= \Beta_0 + \Beta_w RV_{t-1}^{(w)} + \Beta_m RV_{t-1}^{(m)} + \Beta_q RV_{t-1}^{(q)} + u_t\\
+u_t|RV_{t-1}^{(w)}, RV_{t-1}^{(m)}, RV_{t-1}^{(q)} &\sim iid(0, \sigma_u^2)\end{align}
+```
+where:
+
+```{=tex}
+\vspace{-20pt}
+\begin{align}
+RV_{t-1}^{(m)} &= \frac{1}{4} (RV_{t-1}^{(w)} + RV_{t-2}^{(w)} + \dots + RV_{t-5}^{(w)})\\
+RV_{t-1}^{(q)} &= \frac{1}{13} (RV_{t-1}^{(w)} + RV_{t-2}^{(w)} + \dots + RV_{t-13}^{(w)})\end{align}
+```
+Similar to the original HAR model, $RV_{t}^{(w)}$ and $RV_{t}^{(m)}$ reflects investors who rebalance their positions weekly and those that update their strategies or positions within a month. $RV_t^{(q)}$ can be thought of as representing relatively long term investors. They do not readjust their portfolios frequently to information. Rather, they do quarterly rebalancing (every 13 weeks) to avoid too much deviation from their desired portfolio allocation and to avoid too much transaction costs from rebalancing too frequently.
+
+Residual diagnostics are reported in the table below. The residuals of the HAR model for AAPL indicates no autocorrelation in residuals and no heteroskedasticity, so the estimates are unbiased and efficient. The HAR model for AAPL has good properties and no further modification is required. However, the residuals of the HAR model for MSFT exhibits autocorrelated residuals, while the HAR models for AMZN, NVDA, and BRK-B exhibit autocorrelated and heteroskedastic residuals.
+
+|          |  AAPL  |   MSFT    |    AMZN    |  NVDA   |   BRK-B   |
+|:--------:|:------:|:---------:|:----------:|:-------:|:---------:|
+|  Q(20)   | 7.9453 |  45.947   |   68.541   | 27.998  |  85.883   |
+| p-value  | 0.9922 | 0.0008197 | 3.147e-07  | 0.1094  | 3.853e-10 |
+| ARCH(20) | 0.0181 |  30.711   |   165.09   | 34.962  |  118.73   |
+| p-value  |   1    |  0.05912  | \< 2.2e-16 | 0.02031 | 4.901e-16 |
+
+However, the HAR model might still have good forecasting abilities. To test this, we conduct the same procedure of ex-post forecasting to compute the RMSFE for the HAR models. These are summarised below:
+
++----------+-------------+-------------+-------------+-------------+-------------+
+|          | AAPL        | MSFT        | AMZN        | NVDA        | BRK-B       |
++:========:+:===========:+:===========:+:===========:+:===========:+:===========:+
+| RMSFE    | 0.002439522 | 0.001850224 | 0.004117197 | 0.005169414 | 0.006028536 |
++----------+-------------+-------------+-------------+-------------+-------------+
+
+The RMSFE of most HAR models are higher than the selected GARCH models. Only the RMSFE for AMZN's HAR model is 0.00016 lower than the AR(1) - GARCH In Mean(1,1), which is only a minute improvement. Hence, the forecasts of the GARCH models we will be used for financial decision making.
+
+```{r HAR_weekly}
+#| echo: false
+#| message: false
+#| output: false
+
+# Construct dataframe for AAPL_HAR estimation 
+T = length(AAPL.RVw)
+p = 13
+RV_AAPL          = as.matrix(AAPL.RVw)[(p+1):T]
+for (i in 1:p){
+  RV_AAPL        = cbind(RV_AAPL,as.matrix(AAPL.RVw)[((p+1):T)-i])}
+RV.AAPL.HAR      = as.data.frame(cbind(RV_AAPL[,1],
+                                  RV_AAPL[,2],
+                                  apply(RV_AAPL[,2:5],1,mean),
+                                  apply(RV_AAPL[,2:14],1,mean)
+))
+colnames(RV.AAPL.HAR) = c("RV","RVw","RVm","RVq")
+#########################################################################
+# AAPL HAR model
+HAR_AAPL         = lm(RV ~ RVw + RVm + RVq,RV.AAPL.HAR)
+summary(HAR_AAPL)
+# Residual diagnostics
+AutocorTest(as.vector(residuals(HAR_AAPL)), lag=20, type="Ljung-Box")
+ArchTest(as.vector(residuals(HAR_AAPL)), lags=20)
+jarque.bera.test(na.omit(residuals(HAR_AAPL)))
+
+##############################################################
+# MSFT 
+# Convert to HAR format 
+T = length(MSFT.RVw)
+p = 13
+RV_MSFT          = as.matrix(MSFT.RVw)[(p+1):T]
+for (i in 1:p){
+  RV_MSFT        = cbind(RV_MSFT,as.matrix(MSFT.RVw)[((p+1):T)-i])}
+RV.MSFT.HAR      = as.data.frame(cbind(RV_MSFT[,1],
+                                  RV_MSFT[,2],
+                                  apply(RV_MSFT[,2:5],1,mean),
+                                  apply(RV_MSFT[,2:14],1,mean)
+))
+colnames(RV.MSFT.HAR) = c("RV","RVw","RVm","RVq")
+#############################################################
+# MSFT HAR model
+HAR_MSFT         = lm(RV ~ RVw + RVm + RVq,RV.MSFT.HAR)
+summary(HAR_MSFT)
+AutocorTest(as.vector(residuals(HAR_MSFT)), lag=20, type="Ljung-Box")
+ArchTest(as.vector(residuals(HAR_MSFT)), lags=20)
+jarque.bera.test(na.omit(residuals(HAR_MSFT)))
+##############################################################
+# MSFT HAR-GARCH(1,1)
+MSFT.HAR.spec  = ugarchspec(mean.model = list(armaOrder = c(0,0), include.mean = TRUE, external.regressors=as.matrix(RV.MSFT.HAR[,2:4])),
+                             variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                             distribution.model = "norm")
+MSFT.HAR.fit   = ugarchfit(spec=MSFT.HAR.spec, data=as.matrix(RV.MSFT.HAR[,1]), solver = "solnp")
+MSFT.HAR.fit
+
+infocriteria(MSFT.HAR.fit)
+AutocorTest(as.vector(residuals(MSFT.HAR.fit, standard=TRUE)), lag=20, type="Ljung-Box")
+AutocorTest(as.vector(residuals(MSFT.HAR.fit, standard=TRUE))^2, lag=20, type="Ljung-Box")
+ArchTest(as.vector(residuals(MSFT.HAR.fit, standard=TRUE)), lags=20)
+jarque.bera.test(as.vector(residuals(MSFT.HAR.fit, standard=TRUE)))
+##############################################################
+# MSFT HAR-GARCH(1,1) student t distribution 
+MSFT.HAR.spec  = ugarchspec(mean.model = list(armaOrder = c(0,0), include.mean = TRUE, external.regressors=as.matrix(RV.MSFT.HAR[,2:4])),
+                             variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                             distribution.model = "std")
+MSFT.HAR.fit   = ugarchfit(spec=MSFT.HAR.spec, data=as.matrix(RV.MSFT.HAR[,1]), solver = "solnp")
+MSFT.HAR.fit
+
+infocriteria(MSFT.HAR.fit)
+AutocorTest(as.vector(residuals(MSFT.HAR.fit, standard=TRUE)), lag=20, type="Ljung-Box")
+AutocorTest(as.vector(residuals(MSFT.HAR.fit, standard=TRUE))^2, lag=20, type="Ljung-Box")
+ArchTest(as.vector(residuals(MSFT.HAR.fit, standard=TRUE)), lags=20)
+jarque.bera.test(as.vector(residuals(MSFT.HAR.fit, standard=TRUE)))
+
+##############################################################
+# AMZN 
+# Convert to HAR format 
+T = length(AMZN.RVw)
+p = 13
+RV_AMZN          = as.matrix(AMZN.RVw)[(p+1):T]
+for (i in 1:p){
+  RV_AMZN       = cbind(RV_AMZN,as.matrix(AMZN.RVw)[((p+1):T)-i])}
+RV.AMZN.HAR      = as.data.frame(cbind(RV_AMZN[,1],
+                                  RV_AMZN[,2],
+                                  apply(RV_AMZN[,2:5],1,mean),
+                                  apply(RV_AMZN[,2:14],1,mean)
+))
+colnames(RV.AMZN.HAR) = c("RV","RVw","RVm","RVq")
+##############################################################
+# AMZN HAR
+HAR_AMZN         = lm(RV ~ RVw + RVm + RVq,RV.AMZN.HAR)
+summary(HAR_AMZN)
+AutocorTest(as.vector(residuals(HAR_AMZN)), lag=20, type="Ljung-Box")
+ArchTest(as.vector(residuals(HAR_AMZN)), lags=20)
+jarque.bera.test(na.omit(residuals(HAR_AMZN)))
+##############################################################
+# HAR-GARCH(1,1)
+AMZN.HAR.spec  = ugarchspec(mean.model = list(armaOrder = c(0,0), include.mean = TRUE, external.regressors=as.matrix(RV.AMZN.HAR[,2:4])),
+                             variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                             distribution.model = "norm")
+AMZN.HAR.fit   = ugarchfit(spec=AMZN.HAR.spec, data=as.matrix(RV.AMZN.HAR[,1]), solver = "solnp")
+AMZN.HAR.fit
+
+infocriteria(AMZN.HAR.fit)
+AutocorTest(as.vector(residuals(AMZN.HAR.fit, standard=TRUE)), lag=20, type="Ljung-Box")
+AutocorTest(as.vector(residuals(AMZN.HAR.fit, standard=TRUE))^2, lag=20, type="Ljung-Box")
+ArchTest(as.vector(residuals(AMZN.HAR.fit, standard=TRUE)), lags=20)
+jarque.bera.test(as.vector(residuals(AMZN.HAR.fit, standard=TRUE)))
+##############################################################
+# NVDA
+# Convert to HAR format 
+T = length(NVDA.RVw)
+p = 13
+RV_NVDA          = as.matrix(NVDA.RVw)[(p+1):T]
+for (i in 1:p){
+  RV_NVDA       = cbind(RV_NVDA,as.matrix(NVDA.RVw)[((p+1):T)-i])}
+RV.NVDA.HAR      = as.data.frame(cbind(RV_NVDA[,1],
+                                  RV_NVDA[,2],
+                                  apply(RV_NVDA[,2:5],1,mean),
+                                  apply(RV_NVDA[,2:14],1,mean)
+))
+colnames(RV.NVDA.HAR) = c("RV","RVw","RVm","RVq")
+# HAR NVDA
+HAR_NVDA         = lm(RV ~ RVw + RVm + RVq,RV.NVDA.HAR)
+summary(HAR_NVDA)
+AutocorTest(as.vector(residuals(HAR_NVDA)), lag=20, type="Ljung-Box")
+ArchTest(as.vector(residuals(HAR_NVDA)), lags=20)
+jarque.bera.test(na.omit(residuals(HAR_NVDA)))
+##############################################################
+# HAR-GARCH(1,1)
+NVDA.HAR.spec  = ugarchspec(mean.model = list(armaOrder = c(0,0), include.mean = TRUE, external.regressors=as.matrix(RV.NVDA.HAR[,2:4])),
+                             variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                             distribution.model = "norm")
+NVDA.HAR.fit   = ugarchfit(spec=NVDA.HAR.spec, data=as.matrix(RV.NVDA.HAR[,1]), solver = "solnp")
+NVDA.HAR.fit
+
+infocriteria(NVDA.HAR.fit)
+AutocorTest(as.vector(residuals(NVDA.HAR.fit, standard=TRUE)), lag=20, type="Ljung-Box")
+AutocorTest(as.vector(residuals(NVDA.HAR.fit, standard=TRUE))^2, lag=20, type="Ljung-Box")
+ArchTest(as.vector(residuals(NVDA.HAR.fit, standard=TRUE)), lags=20)
+jarque.bera.test(as.vector(residuals(NVDA.HAR.fit, standard=TRUE)))
+##############################################################
+# BRK
+# Convert to HAR format 
+T = length(BRK.RVw)
+p = 13
+RV_BRK          = as.matrix(BRK.RVw)[(p+1):T]
+for (i in 1:p){
+  RV_BRK       = cbind(RV_BRK,as.matrix(BRK.RVw)[((p+1):T)-i])}
+RV.BRK.HAR      = as.data.frame(cbind(RV_BRK[,1],
+                                  RV_BRK[,2],
+                                  apply(RV_BRK[,2:5],1,mean),
+                                  apply(RV_BRK[,2:14],1,mean)
+))
+colnames(RV.BRK.HAR) = c("RV","RVw","RVm","RVq")
+HAR_BRK        = lm(RV ~ RVw + RVm + RVq,RV.BRK.HAR)
+summary(HAR_BRK)
+AutocorTest(as.vector(residuals(HAR_BRK)), lag=20, type="Ljung-Box")
+ArchTest(as.vector(residuals(HAR_BRK)), lags=20)
+jarque.bera.test(na.omit(residuals(HAR_BRK)))
+##############################################################
+# HAR-GARCH(1,1)
+BRK.HAR.spec  = ugarchspec(mean.model = list(armaOrder = c(0,0), include.mean = TRUE, external.regressors=as.matrix(RV.BRK.HAR[,2:4])),
+                             variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                             distribution.model = "std")
+BRK.HAR.fit   = ugarchfit(spec=BRK.HAR.spec, data=as.matrix(RV.BRK.HAR[,1]), solver = "solnp")
+BRK.HAR.fit
+
+infocriteria(BRK.HAR.fit)
+AutocorTest(as.vector(residuals(BRK.HAR.fit, standard=TRUE)), lag=20, type="Ljung-Box")
+AutocorTest(as.vector(residuals(BRK.HAR.fit, standard=TRUE))^2, lag=20, type="Ljung-Box")
+ArchTest(as.vector(residuals(BRK.HAR.fit, standard=TRUE)), lags=20)
+jarque.bera.test(as.vector(residuals(BRK.HAR.fit, standard=TRUE)))
+##############################################################
+```
+
+```{r HAR_ex_post}
+#| echo: false
+#| message: false
+#| output: false
+#| warning: false
+#| eval: false
+#############################################################
+# Estimate for AAPL
+AAPL.HAR.for = HARForecast(as.matrix(AAPL.RVw[1:1263]), periods = c(1,4,13), nRoll = 1, nAhead = 4)
+
+h=4
+T       = length(RV.AAPL.HAR[,1])
+RV.AAPL.HAR.est    = RV.AAPL.HAR[(1:(T-h)),]
+RV.AAPL.HAR.for    = RV.AAPL.HAR[((T-h+1):T), ]
+
+# Need to use direct forecasting
+AAPL.HAR.for = c(NA, NA, NA, NA) 
+for (i in 1:h){
+  HAR_AAPL         = lm(RV[i:1250] ~ RVw[1:(1250-i+1)] + RVm[1:(1250-i+1)] + RVq[1:(1250-i+1)],RV.AAPL.HAR.est)
+  
+  AAPL.HAR.for[i] = coef(HAR_AAPL)[1] + coef(HAR_AAPL)[2]*RV.AAPL.HAR[1250,2] + coef(HAR_AAPL)[3]*RV.AAPL.HAR[1250,3] + coef(HAR_AAPL)[4]*RV.AAPL.HAR[1250,4] 
+}
+AAPL.HAR.for
+# Performance of HAR
+mean(abs(AAPL.RVw[1264:1267] - AAPL.HAR.for))
+sqrt(mean((AAPL.RVw[1264:1267] - AAPL.HAR.for)^2))
+infocriteria(AAPL.gjr.fit)[1]
+#############################################################
+#############################################################
+##############################################################
+h       = 4
+T       = length(rMSFT)
+rMSFT.est    = rMSFT[1:(T-h)]
+rMSFT.for    = rMSFT[(T-h+1):T]
+
+##############################################################
+# Estimate the gjrGARCH with student t distribution for MSFT
+MSFT.gjr.spec    = ugarchspec(mean.model = list(armaOrder = c(1, 0), include.mean = TRUE),
+                                       variance.model = list(model = "gjrGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "std")
+MSFT.gjr.fit     = ugarchfit(spec=MSFT.gjr.spec, data=rMSFT.est, solver = "solnp")
+MSFT.gjr.for     = ugarchforecast(MSFT.gjr.fit, n.ahead = h)
+MSFT.gjr.sd.f  = sigma(MSFT.gjr.for)
+MSFT.gjr.v.f = MSFT.gjr.sd.f^2
+# Performance of GARCH compared to realised volatility
+mean(abs(MSFT.RVw[1264:1267] - MSFT.gjr.v.f))
+sqrt(mean((MSFT.RVw[1264:1267] - MSFT.gjr.v.f)^2))
+infocriteria(MSFT.gjr.fit)[1]
+#############################################################
+# Estimate the HAR
+T       = length(RV.MSFT.HAR[,1])
+RV.MSFT.HAR.est    = RV.MSFT.HAR[(1:(T-h)),]
+RV.MSFT.HAR.for    = RV.MSFT.HAR[((T-h+1):T), ]
+
+# Need to use direct forecasting
+MSFT.HAR.for = c(NA, NA, NA, NA) 
+for (i in 1:h){
+  HAR_MSFT         = lm(RV[i:1250] ~ RVw[1:(1250-i+1)] + RVm[1:(1250-i+1)] + RVq[1:(1250-i+1)],RV.MSFT.HAR.est)
+  
+  MSFT.HAR.for[i] = coef(HAR_MSFT)[1] + coef(HAR_MSFT)[2]*RV.MSFT.HAR.est[1250,2] + coef(HAR_MSFT)[3]*RV.MSFT.HAR.est[1250,3] + coef(HAR_MSFT)[4]*RV.MSFT.HAR.est[1250,4] 
+}
+MSFT.HAR.for
+# Performance of HAR
+mean(abs(MSFT.RVw[1264:1267] - MSFT.HAR.for))
+sqrt(mean((MSFT.RVw[1264:1267] - MSFT.HAR.for)^2))
+infocriteria(MSFT.gjr.fit)[1]
+
+##############################################################
+# Estimate the HAR-GARCH(1,1)
+T       = length(RV.MSFT.HAR[,1])
+RV.MSFT.HAR.est    = RV.MSFT.HAR[(1:(T-h)),]
+RV.MSFT.HAR.for    = RV.AAPL.HAR[((T-h+1):T), ]
+
+# Need to use direct forecasting
+MSFT.HAR.for = c(NA, NA, NA, NA) 
+for (i in 1:h){
+  # model spec
+  MSFT.HAR.spec  = ugarchspec(mean.model = list(armaOrder = c(0,0), include.mean = TRUE, external.regressors=as.matrix(RV.MSFT.HAR.est[1:(1250-i+1),2:4])),
+                            variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                            distribution.model = "norm")
+  # model fit
+  MSFT.HAR.fit   = ugarchfit(spec=MSFT.HAR.spec, data=as.matrix(RV.MSFT.HAR.est[i:1250,1]), solver = "solnp")
+  # forecast
+  MSFT.HAR.for[i]     = fitted(ugarchforecast(MSFT.HAR.fit, n.ahead = i))
+}
+MSFT.HAR.for
+# Performance of HAR
+mean(abs(MSFT.RVw[1264:1267] - MSFT.HAR.for))
+sqrt(mean((MSFT.RVw[1264:1267] - MSFT.HAR.for)^2))
+##############################################################
+# Estimate the HAR-GARCH(1,1) with student-t distribution 
+T       = length(RV.MSFT.HAR[,1])
+RV.MSFT.HAR.est    = RV.MSFT.HAR[(1:(T-h)),]
+RV.MSFT.HAR.for    = RV.AAPL.HAR[((T-h+1):T), ]
+
+# Need to use direct forecasting
+MSFT.HAR.for = c(NA, NA, NA, NA) 
+for (i in 1:h){
+  # model spec
+  MSFT.HAR.spec  = ugarchspec(mean.model = list(armaOrder = c(0,0), include.mean = TRUE, external.regressors=as.matrix(RV.MSFT.HAR.est[1:(1250-i+1),2:4])),
+                            variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                            distribution.model = "std")
+  # model fit
+  MSFT.HAR.fit   = ugarchfit(spec=MSFT.HAR.spec, data=as.matrix(RV.MSFT.HAR.est[i:1250,1]), solver = "solnp")
+  # forecast
+  MSFT.HAR.for[i]     = fitted(ugarchforecast(MSFT.HAR.fit, n.ahead = i))
+}
+MSFT.HAR.for
+# Performance of HAR
+mean(abs(MSFT.RVw[1264:1267] - MSFT.HAR.for))
+sqrt(mean((MSFT.RVw[1264:1267] - MSFT.HAR.for)^2))
+
+####################################################################
+##############################################################
+# Estimate the HAR
+T       = length(RV.AMZN.HAR[,1])
+RV.AMZN.HAR.est    = RV.AMZN.HAR[(1:(T-h)),]
+RV.AMZN.HAR.for    = RV.AMZN.HAR[((T-h+1):T), ]
+
+# Need to use direct forecasting
+AMZN.HAR.for = c(NA, NA, NA, NA) 
+for (i in 1:h){
+  HAR_AMZN         = lm(RV[i:1250] ~ RVw[1:(1250-i+1)] + RVm[1:(1250-i+1)] + RVq[1:(1250-i+1)],RV.AMZN.HAR.est)
+  
+  AMZN.HAR.for[i] = coef(HAR_AMZN)[1] + coef(HAR_AMZN)[2]*RV.AMZN.HAR.est[1250,2] + coef(HAR_AMZN)[3]*RV.AMZN.HAR.est[1250,3] + coef(HAR_AMZN)[4]*RV.AMZN.HAR.est[1250,4] 
+}
+AMZN.HAR.for
+# Performance of HAR
+mean(abs(AMZN.RVw[1264:1267] - AMZN.HAR.for))
+sqrt(mean((AMZN.RVw[1264:1267] - AMZN.HAR.for)^2))
+
+##############################################################
+# Estimate the HAR-GARCH(1,1)
+T       = length(RV.AMZN.HAR[,1])
+RV.AMZN.HAR.est    = RV.AMZN.HAR[(1:(T-h)),]
+RV.AMZN.HAR.for    = RV.AMZN.HAR[((T-h+1):T), ]
+
+# Need to use direct forecasting
+AMZN.HAR.for = c(NA, NA, NA, NA) 
+for (i in 1:h){
+  # model spec
+  AMZN.HAR.spec  = ugarchspec(mean.model = list(armaOrder = c(0,0), include.mean = TRUE, external.regressors=as.matrix(RV.AMZN.HAR.est[1:(1250-i+1),2:4])),
+                            variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                            distribution.model = "norm")
+  # model fit
+  AMZN.HAR.fit   = ugarchfit(spec=AMZN.HAR.spec, data=as.matrix(RV.AMZN.HAR.est[i:1250,1]), solver = "solnp")
+  # forecast
+  AMZN.HAR.for[i]     = fitted(ugarchforecast(AMZN.HAR.fit, n.ahead = i))
+}
+AMZN.HAR.for
+# Performance of HAR
+mean(abs(AMZN.RVw[1264:1267] - AMZN.HAR.for))
+sqrt(mean((AMZN.RVw[1264:1267] - AMZN.HAR.for)^2))
+##############################################################
+# Estimate the HAR-GARCH(1,1) with student-t distribution 
+T       = length(RV.AMZN.HAR[,1])
+RV.AMZN.HAR.est    = RV.AMZN.HAR[(1:(T-h)),]
+RV.AMZN.HAR.for    = RV.AMZN.HAR[((T-h+1):T), ]
+
+# Need to use direct forecasting
+AMZN.HAR.for = c(NA, NA, NA, NA) 
+for (i in 1:h){
+  # model spec
+  AMZN.HAR.spec  = ugarchspec(mean.model = list(armaOrder = c(0,0), include.mean = TRUE, external.regressors=as.matrix(RV.AMZN.HAR.est[1:(1250-i+1),2:4])),
+                            variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                            distribution.model = "std")
+  # model fit
+  AMZN.HAR.fit   = ugarchfit(spec=AMZN.HAR.spec, data=as.matrix(RV.AMZN.HAR.est[i:1250,1]), solver = "solnp")
+  # forecast
+  AMZN.HAR.for[i]     = fitted(ugarchforecast(AMZN.HAR.fit, n.ahead = i))
+}
+AMZN.HAR.for
+# Performance of HAR
+mean(abs(AMZN.RVw[1264:1267] - AMZN.HAR.for))
+sqrt(mean((AMZN.RVw[1264:1267] - AMZN.HAR.for)^2))
+
+##################################################################
+NVDA.HAR.for = HARForecast(NVDA.RVw, periods = c(1,4,13), nRoll = 1, nAhead = 4)
+NVDA.HAR.for@forecast
+# Estimate the HAR
+T       = length(RV.NVDA.HAR[,1])
+RV.NVDA.HAR.est    = RV.NVDA.HAR[(1:(T-h)),]
+RV.NVDA.HAR.for    = RV.NVDA.HAR[((T-h+1):T), ]
+
+# Need to use direct forecasting
+NVDA.HAR.for = c(NA, NA, NA, NA) 
+for (i in 1:h){
+  HAR_NVDA         = lm(RV[i:1250] ~ RVw[1:(1250-i+1)] + RVm[1:(1250-i+1)] + RVq[1:(1250-i+1)],RV.NVDA.HAR.est)
+  
+  NVDA.HAR.for[i] = coef(HAR_NVDA)[1] + coef(HAR_NVDA)[2]*RV.NVDA.HAR.est[1250,2] + coef(HAR_NVDA)[3]*RV.NVDA.HAR.est[1250,3] + coef(HAR_NVDA)[4]*RV.NVDA.HAR.est[1250,4] 
+}
+NVDA.HAR.for
+# Performance of HAR
+mean(abs(NVDA.RVw[1264:1267] - NVDA.HAR.for))
+sqrt(mean((NVDA.RVw[1264:1267] - NVDA.HAR.for)^2))
+
+##############################################################
+# Estimate the HAR-GARCH(1,1)
+T       = length(RV.NVDA.HAR[,1])
+RV.NVDA.HAR.est    = RV.NVDA.HAR[(1:(T-h)),]
+RV.NVDA.HAR.for    = RV.NVDA.HAR[((T-h+1):T), ]
+
+# Need to use direct forecasting
+NVDA.HAR.for = c(NA, NA, NA, NA) 
+for (i in 1:h){
+  # model spec
+  NVDA.HAR.spec  = ugarchspec(mean.model = list(armaOrder = c(0,0), include.mean = TRUE, external.regressors=as.matrix(RV.NVDA.HAR.est[1:(1250-i+1),2:4])),
+                            variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                            distribution.model = "norm")
+  # model fit
+  NVDA.HAR.fit   = ugarchfit(spec=NVDA.HAR.spec, data=as.matrix(RV.NVDA.HAR.est[i:1250,1]), solver = "solnp")
+  # forecast
+  NVDA.HAR.for[i]     = fitted(ugarchforecast(NVDA.HAR.fit, n.ahead = i))
+}
+NVDA.HAR.for
+# Performance of HAR
+mean(abs(NVDA.RVw[1264:1267] - NVDA.HAR.for))
+sqrt(mean((NVDA.RVw[1264:1267] - NVDA.HAR.for)^2))
+##############################################################
+# Estimate the HAR-GARCH(1,1) with student-t distribution 
+# Need to use direct forecasting
+NVDA.HAR.for = c(NA, NA, NA, NA) 
+for (i in 1:h){
+  # model spec
+  NVDA.HAR.spec  = ugarchspec(mean.model = list(armaOrder = c(0,0), include.mean = TRUE, external.regressors=as.matrix(RV.NVDA.HAR.est[1:(1250-i+1),2:4])),
+                            variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                            distribution.model = "std")
+  # model fit
+  NVDA.HAR.fit   = ugarchfit(spec=NVDA.HAR.spec, data=as.matrix(RV.NVDA.HAR.est[i:1250,1]), solver = "solnp")
+  # forecast
+  NVDA.HAR.for[i]     = fitted(ugarchforecast(NVDA.HAR.fit, n.ahead = i))
+}
+NVDA.HAR.for
+# Performance of HAR
+mean(abs(NVDA.RVw[1264:1267] - NVDA.HAR.for))
+sqrt(mean((NVDA.RVw[1264:1267] - NVDA.HAR.for)^2))
+
+##############################################################
+##############################################################
+# Estimate the HAR
+T       = length(RV.BRK.HAR[,1])
+RV.BRK.HAR.est    = RV.BRK.HAR[(1:(T-h)),]
+RV.BRK.HAR.for    = RV.BRK.HAR[((T-h+1):T), ]
+
+# Need to use direct forecasting
+BRK.HAR.for = c(NA, NA, NA, NA) 
+for (i in 1:h){
+  HAR_BRK         = lm(RV[i:1250] ~ RVw[1:(1250-i+1)] + RVm[1:(1250-i+1)] + RVq[1:(1250-i+1)],RV.BRK.HAR.est)
+  
+  BRK.HAR.for[i] = coef(HAR_BRK)[1] + coef(HAR_BRK)[2]*RV.BRK.HAR.est[1250,2] + coef(HAR_BRK)[3]*RV.BRK.HAR.est[1250,3] + coef(HAR_BRK)[4]*RV.BRK.HAR.est[1250,4] 
+}
+BRK.HAR.for
+# Performance of HAR
+mean(abs(BRK.RVw[1264:1267] - BRK.HAR.for))
+sqrt(mean((BRK.RVw[1264:1267] - BRK.HAR.for)^2))
+
+##############################################################
+# Estimate the HAR-GARCH(1,1)
+T       = length(RV.BRK.HAR[,1])
+RV.BRK.HAR.est    = RV.BRK.HAR[(1:(T-h)),]
+RV.BRK.HAR.for    = RV.BRK.HAR[((T-h+1):T), ]
+
+# Need to use direct forecasting
+BRK.HAR.for = c(NA, NA, NA, NA) 
+for (i in 1:h){
+  # model spec
+  BRK.HAR.spec  = ugarchspec(mean.model = list(armaOrder = c(0,0), include.mean = TRUE, external.regressors=as.matrix(RV.BRK.HAR.est[1:(1250-i+1),2:4])),
+                            variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                            distribution.model = "norm")
+  # model fit
+  BRK.HAR.fit   = ugarchfit(spec=BRK.HAR.spec, data=as.matrix(RV.BRK.HAR.est[i:1250,1]), solver = "solnp")
+  # forecast
+  BRK.HAR.for[i]     = fitted(ugarchforecast(BRK.HAR.fit, n.ahead = i))
+}
+BRK.HAR.for
+# Performance of HAR
+mean(abs(BRK.RVw[1264:1267] - BRK.HAR.for))
+sqrt(mean((BRK.RVw[1264:1267] - BRK.HAR.for)^2))
+##############################################################
+# Estimate the HAR-GARCH(1,1) with student-t distribution 
+# Need to use direct forecasting
+BRK.HAR.for = c(NA, NA, NA, NA) 
+for (i in 1:h){
+  # model spec
+  BRK.HAR.spec  = ugarchspec(mean.model = list(armaOrder = c(0,0), include.mean = TRUE, external.regressors=as.matrix(RV.BRK.HAR.est[1:(1250-i+1),2:4])),
+                            variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                            distribution.model = "std")
+  # model fit
+  BRK.HAR.fit   = ugarchfit(spec=BRK.HAR.spec, data=as.matrix(RV.BRK.HAR.est[i:1250,1]), solver = "solnp")
+  # forecast
+  BRK.HAR.for[i]     = fitted(ugarchforecast(BRK.HAR.fit, n.ahead = i))
+}
+BRK.HAR.for
+# Performance of HAR
+mean(abs(BRK.RVw[1264:1267] - BRK.HAR.for))
+sqrt(mean((BRK.RVw[1264:1267] - BRK.HAR.for)^2))
+```
+
+```{r HAR model point forecasts}
+#| echo: false
+#| message: false
+#| output: false
+#| warning: false
+# Generate forecasts ( 4 periods/weeks ahead) - AAPL
+HARForecastAAPL= HARForecast(AAPL.RVw,periods = c(1, 4, 13), nRoll = 1, nAhead = 4, type = "HAR")
+sqrt(HARForecastAAPL@forecast)
+# Generate forecasts ( 4 periods/weeks ahead) - MSFT
+HARForecastMSFT = HARForecast(MSFT.RVw,periods = c(1, 4, 13), nRoll = 1, nAhead = 4, type = "HAR")
+sqrt(HARForecastMSFT@forecast)
+# Generate forecasts ( 4 periods/weeks ahead) - AMZN
+HARForecastAMZN = HARForecast(AMZN.RVw,periods = c(1, 4, 13), nRoll = 1, nAhead = 4, type = "HAR")
+sqrt(HARForecastAMZN@forecast)
+# Generate forecasts ( 4 periods/weeks ahead) - NVDA
+HARForecastNVDA = HARForecast(NVDA.RVw,periods = c(1, 4, 13), nRoll = 1, nAhead = 4, type = "HAR")
+sqrt(HARForecastNVDA@forecast)
+# Generate forecasts ( 4 periods/weeks ahead) - BRKB
+HARForecastBRKB = HARForecast(BRK,periods = c(1, 4, 13), nRoll = 1, nAhead = 4, type = "HAR")
+sqrt(HARForecastBRKB@forecast)
+```
+
+## Forecasting
+
+The forecasts of returns and volatility for AAPL created using the AR(2)-GJR-GARCH(3,1) is plotted below:
+
+```{r AAPL_forecast_plot}
+#| echo: false
+#| message: false
+#| fig-width: 12
+#| fig-height: 5
+# AAPL
+# Set Dates
+h = 4
+dates.AAPL.tmp = seq(from = dates_AAPL_w[1266] + 7, to = dates_AAPL_w[1266] + h*7, by=7)
+dates.AAPL     = c(dates_AAPL_w, dates.AAPL.tmp)
+
+# Estimate the model
+AAPL.gjr.spec     = ugarchspec(mean.model = list(armaOrder=c(1, 0), include.mean = TRUE), 
+                                       variance.model = list(model = "gjrGARCH", garchOrder = c(3,1)),
+                                       distribution.model = "std")
+
+AAPL.gjr.fit    = ugarchfit(spec=AAPL.gjr.spec, data=rAAPL, solver = "solnp")
+AAPL.gjr.f         = ugarchforecast(AAPL.gjr.fit, n.ahead = h)
+
+AAPL.gjr.fci       = cbind(
+  AAPL.gjr.f@forecast$seriesFor + qnorm(0.025)*AAPL.gjr.f@forecast$sigmaFor,
+  AAPL.gjr.f@forecast$seriesFor + qnorm(0.975)*AAPL.gjr.f@forecast$sigmaFor
+)
+
+# Plot
+plot(x=dates.AAPL[1167:1270],y=c(as.vector(rAAPL[1167:1266]),rep(NA,h)), type="l", col=qaf1, ylab=expression(paste(Delta,log(AAPL))), xlab="Time")
+abline(v=dates.AAPL[1266],col=qaf1)
+lines(x=dates.AAPL[1167:1266], y=as.vector(fitted(AAPL.gjr.fit))[1167:1266], col=qaf3,lwd=2)
+lines(x=dates.AAPL[1167:1266], y=as.vector(sigma(AAPL.gjr.fit))[1167:1266], col=qaf2,lwd=2)
+abline(h=0,col=qaf1)
+
+# Forecast interval 
+polygon(x=c(dates.AAPL[1266],dates.AAPL.tmp,dates.AAPL.tmp[h:1],dates.AAPL[1266]), y=c(as.vector(fitted(AAPL.gjr.fit))[1266],AAPL.gjr.fci[,1],AAPL.gjr.fci[h:1,2],as.vector(fitted(AAPL.gjr.fit))[1266]), col=qaf3.shade2,border=qaf3.shade2)
+# forecasted values
+lines(x=dates.AAPL[1266:(1266+h)], y=c(as.vector(fitted(AAPL.gjr.fit))[1266],AAPL.gjr.f@forecast$seriesFor),lwd=2, col=qaf3)
+lines(x=dates.AAPL[1266:(1266+h)], y=c(as.vector(sigma(AAPL.gjr.fit))[1266],AAPL.gjr.f@forecast$sigmaFor),lwd=2, col=qaf2)
+legend("bottomright", legend=c(expression(paste(Delta,log(AAPL)," from 2021 June")),expression(paste(sqrt(h[t])," - fitted and forecasted values")), expression(paste(y[t]," - fitted and forecasted values")), "- forecast 95% CI"), col=c(qaf1,qaf2, qaf3, qaf3.shade2), lwd=c(2,2),bty="n", cex=0.7)
+```
+
+```{r MSFT_forecast_plot}
+#| echo: false
+#| message: false
+#| fig-width: 12
+#| fig-height: 5
+#| eval: false
+# AAPL
+h=4
+# Set Dates
+dates.MSFT.tmp = seq(from = dates_MSFT_w[1266] + 7, to = dates_MSFT_w[1266] + h*7, by=7)
+dates.MSFT     = c(dates_MSFT_w, dates.MSFT.tmp)
+# Estimate the model
+MSFT.gjr.spec     = ugarchspec(mean.model = list(armaOrder=c(1, 0), include.mean = TRUE), 
+                                       variance.model = list(model = "gjrGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "norm")
+
+MSFT.gjr.fit    = ugarchfit(spec=MSFT.gjr.spec, data=rMSFT, solver = "solnp")
+MSFT.gjr.f         = ugarchforecast(MSFT.gjr.fit, n.ahead = h)
+
+MSFT.gjr.fci       = cbind(
+  MSFT.gjr.f@forecast$seriesFor + qnorm(0.025)*MSFT.gjr.f@forecast$sigmaFor,
+  MSFT.gjr.f@forecast$seriesFor + qnorm(0.975)*MSFT.gjr.f@forecast$sigmaFor
+)
+
+# Plot
+plot(x=dates.MSFT[1167:1270],y=c(as.vector(rMSFT[1167:1266]),rep(NA,h)), type="l", col=qaf1, ylab=expression(paste(Delta,log(MSFT))), xlab="Time")
+abline(v=dates.MSFT[1266],col=qaf1)
+lines(x=dates.MSFT[1167:1266], y=as.vector(fitted(MSFT.gjr.fit))[1167:1266], col=qaf3,lwd=2)
+lines(x=dates.MSFT[1167:1266], y=as.vector(sigma(MSFT.gjr.fit))[1167:1266], col=qaf2,lwd=2)
+abline(h=0,col=qaf1)
+
+# Forecast interval 
+polygon(x=c(dates.MSFT[1266],dates.MSFT.tmp,dates.MSFT.tmp[h:1],dates.MSFT[1266]), y=c(as.vector(fitted(MSFT.gjr.fit))[1266],MSFT.gjr.fci[,1],MSFT.gjr.fci[h:1,2],as.vector(fitted(MSFT.gjr.fit))[1266]), col=qaf3.shade2,border=qaf3.shade2)
+# forecasted values
+lines(x=dates.MSFT[1266:(1266+h)], y=c(as.vector(fitted(MSFT.gjr.fit))[1266],MSFT.gjr.f@forecast$seriesFor),lwd=2, col=qaf3)
+lines(x=dates.MSFT[1266:(1266+h)], y=c(as.vector(sigma(MSFT.gjr.fit))[1266],MSFT.gjr.f@forecast$sigmaFor),lwd=2, col=qaf2)
+legend("bottomright", legend=c(expression(paste(Delta,log(MSFT)," from 2021 June")),expression(paste(sqrt(h[t])," - fitted and forecasted values")), expression(paste(y[t]," - fitted and forecasted values")), "- forecast 95% CI"), col=c(qaf1,qaf2, qaf3, qaf3.shade2), lwd=c(2,2),bty="n", cex=0.7)
+```
+
+```{r AMZN_forecast_plot}
+#| echo: false
+#| message: false
+#| fig-width: 12
+#| fig-height: 5
+#| eval: false
+# AAPL
+h=4
+# Set Dates
+dates.AMZN.tmp = seq(from = dates_AMZN_w[1266] + 7, to = dates_AMZN_w[1266] + h*7, by=7)
+dates.AMZN     = c(dates_AMZN_w, dates.AMZN.tmp)
+# Estimate the model
+AMZN.gjr.spec     = ugarchspec(mean.model = list(armaOrder=c(1, 0), include.mean = TRUE, archm=TRUE), 
+                                       variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "norm")
+
+AMZN.gjr.fit    = ugarchfit(spec=AMZN.gjr.spec, data=rAMZN, solver = "solnp")
+AMZN.gjr.f         = ugarchforecast(AMZN.gjr.fit, n.ahead = h)
+
+AMZN.gjr.fci       = cbind(
+  AMZN.gjr.f@forecast$seriesFor + qnorm(0.025)*AMZN.gjr.f@forecast$sigmaFor,
+  AMZN.gjr.f@forecast$seriesFor + qnorm(0.975)*AMZN.gjr.f@forecast$sigmaFor
+)
+
+# Plot
+plot(x=dates.AMZN[1167:1270],y=c(as.vector(rAMZN[1167:1266]),rep(NA,h)), type="l", col=qaf1, ylab=expression(paste(Delta,log(AMZN))), xlab="Time")
+abline(v=dates.AMZN[1266],col=qaf1)
+lines(x=dates.AMZN[1167:1266], y=as.vector(fitted(AMZN.gjr.fit))[1167:1266], col=qaf3,lwd=2)
+lines(x=dates.AMZN[1167:1266], y=as.vector(sigma(AMZN.gjr.fit))[1167:1266], col=qaf2,lwd=2)
+abline(h=0,col=qaf1)
+
+# Forecast interval 
+polygon(x=c(dates.AMZN[1266],dates.AMZN.tmp,dates.AMZN.tmp[h:1],dates.AMZN[1266]), y=c(as.vector(fitted(AMZN.gjr.fit))[1266],AMZN.gjr.fci[,1],AMZN.gjr.fci[h:1,2],as.vector(fitted(AMZN.gjr.fit))[1266]), col=qaf3.shade2,border=qaf3.shade2)
+# forecasted values
+lines(x=dates.AMZN[1266:(1266+h)], y=c(as.vector(fitted(AMZN.gjr.fit))[1266],AMZN.gjr.f@forecast$seriesFor),lwd=2, col=qaf3)
+lines(x=dates.AMZN[1266:(1266+h)], y=c(as.vector(sigma(AMZN.gjr.fit))[1266],AMZN.gjr.f@forecast$sigmaFor),lwd=2, col=qaf2)
+legend("bottomright", legend=c(expression(paste(Delta,log(AMZN)," from 2021 June")),expression(paste(sqrt(h[t])," - fitted and forecasted values")), expression(paste(y[t]," - fitted and forecasted values")), "- forecast 95% CI"), col=c(qaf1,qaf2, qaf3, qaf3.shade2), lwd=c(2,2),bty="n", cex=0.7)
+```
+
+```{r NVDA_forecast_plot}
+#| echo: false
+#| message: false
+#| fig-width: 12
+#| fig-height: 5
+#| eval: false
+h=4
+# AAPL
+# Set Dates
+dates.NVDA.tmp = seq(from = dates_NVDA_w[1266] + 7, to = dates_NVDA_w[1266] + h*7, by=7)
+dates.NVDA     = c(dates_NVDA_w, dates.NVDA.tmp)
+# Estimate the model
+NVDA.gjr.spec     = ugarchspec(mean.model = list(armaOrder=c(1, 0), include.mean = TRUE, archm=TRUE), 
+                                       variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "std")
+
+NVDA.gjr.fit    = ugarchfit(spec=NVDA.gjr.spec, data=rNVDA, solver = "solnp")
+NVDA.gjr.f         = ugarchforecast(NVDA.gjr.fit, n.ahead = h)
+
+NVDA.gjr.fci       = cbind(
+  NVDA.gjr.f@forecast$seriesFor + qnorm(0.025)*NVDA.gjr.f@forecast$sigmaFor,
+  NVDA.gjr.f@forecast$seriesFor + qnorm(0.975)*NVDA.gjr.f@forecast$sigmaFor
+)
+
+# Plot
+plot(x=dates.NVDA[1167:1270],y=c(as.vector(rNVDA[1167:1266]),rep(NA,h)), type="l", col=qaf1, ylab=expression(paste(Delta,log(NVDA))), xlab="Time")
+abline(v=dates.NVDA[1266],col=qaf1)
+lines(x=dates.NVDA[1167:1266], y=as.vector(fitted(NVDA.gjr.fit))[1167:1266], col=qaf3,lwd=2)
+lines(x=dates.NVDA[1167:1266], y=as.vector(sigma(NVDA.gjr.fit))[1167:1266], col=qaf2,lwd=2)
+abline(h=0,col=qaf1)
+
+# Forecast interval 
+polygon(x=c(dates.NVDA[1266],dates.NVDA.tmp,dates.NVDA.tmp[h:1],dates.NVDA[1266]), y=c(as.vector(fitted(NVDA.gjr.fit))[1266],NVDA.gjr.fci[,1],NVDA.gjr.fci[h:1,2],as.vector(fitted(NVDA.gjr.fit))[1266]), col=qaf3.shade2,border=qaf3.shade2)
+# forecasted values
+lines(x=dates.NVDA[1266:(1266+h)], y=c(as.vector(fitted(NVDA.gjr.fit))[1266],NVDA.gjr.f@forecast$seriesFor),lwd=2, col=qaf3)
+lines(x=dates.NVDA[1266:(1266+h)], y=c(as.vector(sigma(NVDA.gjr.fit))[1266],NVDA.gjr.f@forecast$sigmaFor),lwd=2, col=qaf2)
+legend("bottomright", legend=c(expression(paste(Delta,log(NVDA)," from 2021 June")),expression(paste(sqrt(h[t])," - fitted and forecasted values")), expression(paste(y[t]," - fitted and forecasted values")), "- forecast 95% CI"), col=c(qaf1,qaf2, qaf3, qaf3.shade2), lwd=c(2,2),bty="n", cex=0.7)
+```
+
+```{r BRK_forecast_plot}
+#| echo: false
+#| message: false
+#| fig-width: 12
+#| fig-height: 5
+#| eval: false
+h=4
+# AAPL
+# Set Dates
+dates.BRK.tmp = seq(from = dates_BRK_w[1266] + 7, to = dates_BRK_w[1266] + h*7, by=7)
+dates.BRK     = c(dates_BRK_w, dates.BRK.tmp)
+# Estimate the model
+BRK.gjr.spec     = ugarchspec(mean.model = list(armaOrder=c(1, 0), include.mean = TRUE), 
+                                       variance.model = list(model = "gjrGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "norm")
+
+BRK.gjr.fit    = ugarchfit(spec=BRK.gjr.spec, data=rBRK, solver = "solnp")
+BRK.gjr.f         = ugarchforecast(BRK.gjr.fit, n.ahead = h)
+
+BRK.gjr.fci       = cbind(
+  BRK.gjr.f@forecast$seriesFor + qnorm(0.025)*BRK.gjr.f@forecast$sigmaFor,
+  BRK.gjr.f@forecast$seriesFor + qnorm(0.975)*BRK.gjr.f@forecast$sigmaFor
+)
+
+# Plot
+plot(x=dates.BRK[1167:1270],y=c(as.vector(rBRK[1167:1266]),rep(NA,h)), type="l", col=qaf1, ylab=expression(paste(Delta,log(BRK))), xlab="Time")
+abline(v=dates.BRK[1266],col=qaf1)
+lines(x=dates.BRK[1167:1266], y=as.vector(fitted(BRK.gjr.fit))[1167:1266], col=qaf3,lwd=2)
+lines(x=dates.BRK[1167:1266], y=as.vector(sigma(BRK.gjr.fit))[1167:1266], col=qaf2,lwd=2)
+abline(h=0,col=qaf1)
+
+# Forecast interval 
+polygon(x=c(dates.BRK[1266],dates.BRK.tmp,dates.BRK.tmp[h:1],dates.BRK[1266]), y=c(as.vector(fitted(BRK.gjr.fit))[1266],BRK.gjr.fci[,1],BRK.gjr.fci[h:1,2],as.vector(fitted(BRK.gjr.fit))[1266]), col=qaf3.shade2,border=qaf3.shade2)
+# forecasted values
+lines(x=dates.BRK[1266:(1266+h)], y=c(as.vector(fitted(BRK.gjr.fit))[1266],BRK.gjr.f@forecast$seriesFor),lwd=2, col=qaf3)
+lines(x=dates.BRK[1266:(1266+h)], y=c(as.vector(sigma(BRK.gjr.fit))[1266],BRK.gjr.f@forecast$sigmaFor),lwd=2, col=qaf2)
+legend("bottomright", legend=c(expression(paste(Delta,log(BRK)," from 2021 June")),expression(paste(sqrt(h[t])," - fitted and forecasted values")), expression(paste(y[t]," - fitted and forecasted values")), "- forecast 95% CI"), col=c(qaf1,qaf2, qaf3, qaf3.shade2), lwd=c(2,2),bty="n", cex=0.7)
+```
+
+For the remaining stocks, the point forecasts for weekly returns and standard deviation over the next 4 weeks are summarised in the tables below.
+
++------------------+---------------------------+----------------------------+----------------------------+----------------------------+
+| Stocks (Returns) | 1 week ahead (12-05-2023) | 2 weeks ahead (19-05-2023) | 3 weeks ahead (26-05-2023) | 4 weeks ahead (02-06-2023) |
++==================+===========================+============================+============================+============================+
+| AAPL             | 0.006138                  | 0.006172                   | 0.006395                   | 0.006395                   |
++------------------+---------------------------+----------------------------+----------------------------+----------------------------+
+| MSFT             | 0.002301                  | 0.002872                   | 0.002835                   | 0.002837                   |
++------------------+---------------------------+----------------------------+----------------------------+----------------------------+
+| AMZN             | 0.004740                  | 0.004701                   | 0.004700                   | 0.004698                   |
++------------------+---------------------------+----------------------------+----------------------------+----------------------------+
+| NVDA             | 0.007180                  | 0.006655                   | 0.006665                   | 0.006686                   |
++------------------+---------------------------+----------------------------+----------------------------+----------------------------+
+| BRKB             | 0.003696                  | 0.001817                   | 0.002013                   | 0.001992                   |
++------------------+---------------------------+----------------------------+----------------------------+----------------------------+
+
+There is no consistent trend in forecasted returns, with AAPL and MSFT seeing an increase while AMZN, NVDA, and BRK-B a decrease in general.
+
++-----------------------------+---------------------------+----------------------------+----------------------------+----------------------------+
+| Stocks (Standard deviation) | 1 week ahead (12-05-2023) | 2 weeks ahead (19-05-2023) | 3 weeks ahead (26-05-2023) | 4 weeks ahead (02-06-2023) |
++=============================+===========================+============================+============================+============================+
+| AAPL                        | 0.03640                   | 0.03906                    | 0.03955                    | 0.03966                    |
++-----------------------------+---------------------------+----------------------------+----------------------------+----------------------------+
+| MSFT                        | 0.03625                   | 0.03630                    | 0.03635                    | 0.03639                    |
++-----------------------------+---------------------------+----------------------------+----------------------------+----------------------------+
+| AMZN                        | 0.05398                   | 0.05402                    | 0.05406                    | 0.05410                    |
++-----------------------------+---------------------------+----------------------------+----------------------------+----------------------------+
+| NVDA                        | 0.05730                   | 0.05770                    | 0.05809                    | 0.05848                    |
++-----------------------------+---------------------------+----------------------------+----------------------------+----------------------------+
+| BRKB                        | 0.02282                   | 0.02318                    | 0.02351                    | 0.02382                    |
++-----------------------------+---------------------------+----------------------------+----------------------------+----------------------------+
+
+Conditional standard deviation is forecasted to increase slightly over time for all stocks, suggesting that the model predicts more uncertainty over the next four weeks.
+
+## Financial decision
+
+Our results are useful in informing investment strategies. Capitalising on profitable opportunities helps improve efficiency in the market as it encourages underpriced assets to be bought and overpriced assets to be shorted. Such demand and supply forces pushes the stock prices towards its fundamental value.
+
+The forecasted returns can be considered with Value at Risk (VaR) to determine whether to invest in a stock. In accordance with the regulatory stipulations of Basel II: International Convergence of Capital Measurement and Capital Standards, Value-at-Risk (VaR) will be assessed and reported based on a 10-day-ahead (2-weeks-ahead) forecast. For instance, short term investors can aggregate the 1-week-ahead and 2-weeks-ahead forecasted returns of the stocks (presented in the section **Forecasting**) to compute the forecast returns over the next two weeks.
+
+```{=tex}
+\vspace{-20pt}
+\begin{align}
+r(2\ weeks)_{AAPL} = 0.006138 + 0.006172 = 0.01231\\
+r(2\ weeks)_{MSFT} = 0.002301 + 0.002872 = 0.005173\\
+r(2\ weeks)_{AMZN} = 0.004740 + 0.004701 = 0.009441\\
+r(2\ weeks)_{NVDA} = 0.007180 + 0.006655 = 0.013835\\
+r(2\ weeks)_{BRK} = 0.003696 + 0.001817 = 0.005513\end{align}
+```
+Taking AAPL as an example, if an investor's transaction costs are reasonably lower than 1.231% of the investment, for example 0.1%, he or she can potentially profit over the next 2 weeks by buying stocks in AAPL. However, it is important to recognise that there are risks involved. There may be unexpected price fluctuations over the next two weeks that can result in returns that are different than the ones forecasted. The Value at Risk of the stocks are summarised in the table below. These highlight the maximum possible losses for holding a short position or long positions in these stocks in an extreme event of 1%, 5% or 10% probability over the next two weeks. If an investor is comfortable with bearing the risk of such losses in an extreme event, then it can be profitable to pursue a long position in these stocks.
+
+**2-week-ahead VaR (week of 12 May to 19 May 2023)**
+
++---------+----------------+----------------+-----------------+---------+---------+---------+
+| Stock   | 1% VaR (short) | 5% VaR (short) | 10% VaR (short) | 1% VaR  | 5% VaR  | 10% VaR |
++:=======:+:==============:+:==============:+:===============:+:=======:+:=======:+:=======:+
+| AAPL    | 0.177          | 0.115          | 0.089           | -0.151  | -0.090  | -0.064  |
++---------+----------------+----------------+-----------------+---------+---------+---------+
+| MSFT    | 0.121          | 0.087          | 0.069           | -0.110  | -0.077  | -0.058  |
++---------+----------------+----------------+-----------------+---------+---------+---------+
+| AMZN    | 0.186          | 0.134          | 0.107           | -0.167  | -0.115  | -0.088  |
++---------+----------------+----------------+-----------------+---------+---------+---------+
+| NVDA    | 0.274          | 0.174          | 0.132           | -0.246  | -0.146  | -0.105  |
++---------+----------------+----------------+-----------------+---------+---------+---------+
+| BRKB    | 0.077          | 0.056          | 0.045           | -0.066  | -0.045  | -0.034  |
++---------+----------------+----------------+-----------------+---------+---------+---------+
+
+Similarly, given that forecasted returns are also positive for the week of 12 May 2023, if an investor thoroughly understands and is comfortable with the risk highlighted by the one week VaR, he can attempt to profit by purchasing these stocks with a one week investment horizon.
+
+```{r VaR_1_week}
+#| message: false
+#| echo: false
+#| warning: false
+#| output: false
+#The following code estimates the VaR for 99%,95%,90% & 1%,5%,10%
+
+############################# reestimate model #############################
+# Re-estimate the GJR-GARCH model using the selected model - AAPL
+garch.specVAR = ugarchspec(mean.model = list(armaOrder = c(1, 0), include.mean = TRUE),
+                                       variance.model = list(model = "gjrGARCH", garchOrder = c(3,1)),
+                                       distribution.model = "std")
+garch.fitVAR = ugarchfit(spec=garch.specVAR, data=rAAPL, solver = "solnp", solver.control = list(ftol_rel=1e-11,xtol_rel=1e-11, maxeval=10000))
+
+garch.foreVAR = ugarchforecast(garch.fitVAR, n.ahead = 1)
+
+# Get forecasted mean and parameters
+garch.mean.fVAR = fitted(garch.foreVAR)
+garch.parVAR = coef(garch.fitVAR)
+sigma.fVAR = sigma(garch.foreVAR)
+variance.f.VAR = sigma.fVAR^2
+
+# Calculating 1% and 99% VaR
+garch.mean.fVAR + qt(0.99, 6.448834)*sigma.fVAR
+garch.mean.fVAR + qt(0.01, 6.448834)*sigma.fVAR
+
+# Calculating 5% and 95% VaR
+garch.mean.fVAR + qt(0.95, 6.448834)*sigma.fVAR
+garch.mean.fVAR + qt(0.05, 6.448834)*sigma.fVAR
+
+# Calculating 10% and 90% VaR
+garch.mean.fVAR + qt(0.9, 6.448834)*sigma.fVAR
+garch.mean.fVAR + qt(0.1, 6.448834)*sigma.fVAR
+############################# reestimate model ############################# - MSFT
+# Re-estimate the GJR-GARCH model using the estimation dataset
+garch.specVAR = ugarchspec(mean.model = list(armaOrder = c(1, 0), include.mean = TRUE),
+                                       variance.model = list(model = "gjrGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "norm")
+garch.fitVAR = ugarchfit(spec=garch.specVAR, data=rMSFT, solver = "solnp", solver.control = list(ftol_rel=1e-11,xtol_rel=1e-11, maxeval=10000))
+
+garch.foreVAR = ugarchforecast(garch.fitVAR, n.ahead = 1)
+
+# Get forecasted mean and parameters
+garch.mean.fVAR = fitted(garch.foreVAR)
+garch.parVAR = coef(garch.fitVAR)
+sigma.fVAR = sigma(garch.foreVAR)
+variance.f.VAR = sigma.fVAR^2
+
+# Calculating 1% and 99% VaR
+garch.mean.fVAR + qnorm(0.99)*sigma.fVAR
+garch.mean.fVAR + qnorm(0.01)*sigma.fVAR
+
+# Calculating 5% and 95% VaR
+garch.mean.fVAR + qnorm(0.95)*sigma.fVAR
+garch.mean.fVAR + qnorm(0.05)*sigma.fVAR
+
+# Calculating 10% and 90% VaR
+garch.mean.fVAR + qnorm(0.9)*sigma.fVAR
+garch.mean.fVAR + qnorm(0.1)*sigma.fVAR
+############################# reestimate model ############################# - AMZN
+# Re-estimate the GJR-GARCH model using the estimation dataset
+garch.specVAR = ugarchspec(mean.model = list(armaOrder = c(1, 0), include.mean = TRUE, archm = TRUE),
+                                       variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "norm")
+garch.fitVAR = ugarchfit(spec=garch.specVAR, data=rAMZN, solver = "solnp", solver.control = list(ftol_rel=1e-11,xtol_rel=1e-11, maxeval=10000))
+
+garch.foreVAR = ugarchforecast(garch.fitVAR, n.ahead = 1)
+
+# Get forecasted mean and parameters
+garch.mean.fVAR = fitted(garch.foreVAR)
+garch.parVAR = coef(garch.fitVAR)
+sigma.fVAR = sigma(garch.foreVAR)
+variance.f.VAR = sigma.fVAR^2
+
+# Calculating 1% and 99% VaR
+garch.mean.fVAR + qnorm(0.99)*sigma.fVAR
+garch.mean.fVAR + qnorm(0.01)*sigma.fVAR
+
+# Calculating 5% and 95% VaR
+garch.mean.fVAR + qnorm(0.95)*sigma.fVAR
+garch.mean.fVAR + qnorm(0.05)*sigma.fVAR
+
+# Calculating 10% and 90% VaR
+garch.mean.fVAR + qnorm(0.9)*sigma.fVAR
+garch.mean.fVAR + qnorm(0.1)*sigma.fVAR
+
+############################# reestimate model ############################# - NVDA
+# Re-estimate the GJR-GARCH model using the estimation dataset
+garch.specVAR = ugarchspec(mean.model = list(armaOrder = c(1, 0), include.mean = TRUE, archm = TRUE),
+                                       variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "std")
+garch.fitVAR = ugarchfit(spec=garch.specVAR, data=rNVDA, solver = "solnp", solver.control = list(ftol_rel=1e-11,xtol_rel=1e-11, maxeval=10000))
+
+garch.foreVAR = ugarchforecast(garch.fitVAR, n.ahead = 1)
+
+# Get forecasted mean and parameters
+garch.mean.fVAR = fitted(garch.foreVAR)
+garch.parVAR = coef(garch.fitVAR)
+sigma.fVAR = sigma(garch.foreVAR)
+variance.f.VAR = sigma.fVAR^2
+
+# Calculate the mean and variance for 2 weeks
+mean2wVAR   = sum(garch.mean.fVAR)
+var2wVAR = (sigma.fVAR^2)[2] + ((1+garch.parVAR[2])^2)*(sigma.fVAR^2)[1]
+
+# Calculating 1% and 99% VaR
+garch.mean.fVAR + qt(0.99, 5.883742)*sigma.fVAR
+garch.mean.fVAR + qt(0.01, 5.883742)*sigma.fVAR
+
+# Calculating 5% and 95% VaR
+garch.mean.fVAR + qt(0.95, 5.883742)*sigma.fVAR
+garch.mean.fVAR + qt(0.05, 5.883742)*sigma.fVAR
+
+# Calculating 10% and 90% VaR
+garch.mean.fVAR + qt(0.9, 5.883742)*sigma.fVAR
+garch.mean.fVAR + qt(0.1, 5.883742)*sigma.fVAR
+
+############################# reestimate model ############################# - BRKB
+# Re-estimate the GJR-GARCH model using the estimation dataset
+garch.specVAR = ugarchspec(mean.model = list(armaOrder = c(1, 0), include.mean = TRUE),
+                                       variance.model = list(model = "gjrGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "norm")
+garch.fitVAR = ugarchfit(spec=garch.specVAR, data=rBRK, solver = "solnp", solver.control = list(ftol_rel=1e-11,xtol_rel=1e-11, maxeval=10000))
+
+garch.foreVAR = ugarchforecast(garch.fitVAR, n.ahead = 1)
+
+# Get forecasted mean and parameters
+garch.mean.fVAR = fitted(garch.foreVAR)
+garch.parVAR = coef(garch.fitVAR)
+sigma.fVAR = sigma(garch.foreVAR)
+variance.f.VAR = sigma.fVAR^2
+
+# Calculating 1% and 99% VaR
+garch.mean.fVAR + qnorm(0.99)*sigma.fVAR
+garch.mean.fVAR + qnorm(0.01)*sigma.fVAR
+
+# Calculating 5% and 95% VaR
+garch.mean.fVAR + qnorm(0.95)*sigma.fVAR
+garch.mean.fVAR + qnorm(0.05)*sigma.fVAR
+
+# Calculating 10% and 90% VaR
+garch.mean.fVAR + qnorm(0.9)*sigma.fVAR
+garch.mean.fVAR + qnorm(0.1)*sigma.fVAR
+```
+
+**1-week-ahead VaR (week of 12 May 2023)**
+
++---------+----------------+----------------+-----------------+---------+---------+---------+
+| Stock   | 1% VaR (short) | 5% VaR (short) | 10% VaR (short) | 1% VaR  | 5% VaR  | 10% VaR |
++:=======:+:==============:+:==============:+:===============:+:=======:+:=======:+:=======:+
+| AAPL    | 0.118          | 0.076          | 0.058           | -0.105  | -0.064  | -0.046  |
++---------+----------------+----------------+-----------------+---------+---------+---------+
+| MSFT    | 0.087          | 0.062          | 0.049           | -0.082  | -0.057  | -0.044  |
++---------+----------------+----------------+-----------------+---------+---------+---------+
+| AMZN    | 0.130          | 0.094          | 0.074           | -0.121  | -0.084  | -0.064  |
++---------+----------------+----------------+-----------------+---------+---------+---------+
+| NVDA    | 0.188          | 0.119          | 0.090           | -0.174  | -0.105  | -0.076  |
++---------+----------------+----------------+-----------------+---------+---------+---------+
+| BRKB    | 0.057          | 0.041          | 0.033           | -0.049  | -0.034  | -0.026  |
++---------+----------------+----------------+-----------------+---------+---------+---------+
+
+```{r VaR}
+#| message: false
+#| echo: false
+#| warning: false
+#| output: false
+#The following code estimates the VaR for 99%,95%,90% & 1%,5%,10%
+
+############################# reestimate model #############################
+# Re-estimate the GJR-GARCH model using the selected model - AAPL
+garch.specVAR = ugarchspec(mean.model = list(armaOrder = c(1, 0), include.mean = TRUE),
+                                       variance.model = list(model = "gjrGARCH", garchOrder = c(3,1)),
+                                       distribution.model = "std")
+garch.fitVAR = ugarchfit(spec=garch.specVAR, data=rAAPL, solver = "solnp", solver.control = list(ftol_rel=1e-11,xtol_rel=1e-11, maxeval=10000))
+
+garch.foreVAR = ugarchforecast(garch.fitVAR, n.ahead = 2)
+
+# Get forecasted mean and parameters
+garch.mean.fVAR = fitted(garch.foreVAR)
+garch.parVAR = coef(garch.fitVAR)
+sigma.fVAR = sigma(garch.foreVAR)
+variance.f.VAR = sigma.fVAR^2
+
+# Calculate the mean and variance for 2 weeks
+mean2wVAR   = sum(garch.mean.fVAR)
+var2wVAR = (sigma.fVAR^2)[2] + ((1+garch.parVAR[2])^2)*(sigma.fVAR^2)[1]
+
+# Calculating 1% and 99% VaR
+mean2wVAR + qt(0.99, 6.448834)*sqrt(var2wVAR)
+mean2wVAR + qt(0.01, 6.448834)*sqrt(var2wVAR)
+
+# Calculating 5% and 95% VaR
+mean2wVAR + qt(0.95, 6.448834)*sqrt(var2wVAR)
+mean2wVAR + qt(0.05, 6.448834)*sqrt(var2wVAR)
+
+# Calculating 10% and 90% VaR
+mean2wVAR + qt(0.90, 6.448834)*sqrt(var2wVAR)
+mean2wVAR + qt(0.1, 6.448834)*sqrt(var2wVAR)
+############################# reestimate model ############################# - MSFT
+# Re-estimate the GJR-GARCH model using the estimation dataset
+garch.specVAR = ugarchspec(mean.model = list(armaOrder = c(1, 0), include.mean = TRUE),
+                                       variance.model = list(model = "gjrGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "norm")
+garch.fitVAR = ugarchfit(spec=garch.specVAR, data=rMSFT, solver = "solnp", solver.control = list(ftol_rel=1e-11,xtol_rel=1e-11, maxeval=10000))
+
+garch.foreVAR = ugarchforecast(garch.fitVAR, n.ahead = 2)
+
+# Get forecasted mean and parameters
+garch.mean.fVAR = fitted(garch.foreVAR)
+garch.parVAR = coef(garch.fitVAR)
+sigma.fVAR = sigma(garch.foreVAR)
+variance.f.VAR = sigma.fVAR^2
+
+# Calculate the mean and variance for 2 weeks
+mean2wVAR   = sum(garch.mean.fVAR)
+var2wVAR = (sigma.fVAR^2)[2] + ((1+garch.parVAR[2])^2)*(sigma.fVAR^2)[1]
+
+# Calculating 1% and 99% VaR
+mean2wVAR + qnorm(0.99)*sqrt(var2wVAR)
+mean2wVAR + qnorm(0.01)*sqrt(var2wVAR)
+
+# Calculating 5% and 95% VaR
+mean2wVAR + qnorm(0.95)*sqrt(var2wVAR)
+mean2wVAR + qnorm(0.05)*sqrt(var2wVAR)
+
+# Calculating 10% and 90% VaR
+mean2wVAR + qnorm(0.9)*sqrt(var2wVAR)
+mean2wVAR + qnorm(0.1)*sqrt(var2wVAR)
+############################# reestimate model ############################# - AMZN
+# Re-estimate the GJR-GARCH model using the estimation dataset
+garch.specVAR = ugarchspec(mean.model = list(armaOrder = c(1, 0), include.mean = TRUE, archm = TRUE),
+                                       variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "norm")
+garch.fitVAR = ugarchfit(spec=garch.specVAR, data=rAMZN, solver = "solnp", solver.control = list(ftol_rel=1e-11,xtol_rel=1e-11, maxeval=10000))
+
+garch.foreVAR = ugarchforecast(garch.fitVAR, n.ahead = 2)
+
+# Get forecasted mean and parameters
+garch.mean.fVAR = fitted(garch.foreVAR)
+garch.parVAR = coef(garch.fitVAR)
+sigma.fVAR = sigma(garch.foreVAR)
+variance.f.VAR = sigma.fVAR^2
+
+# Calculate the mean and variance for 2 weeks
+mean2wVAR   = sum(garch.mean.fVAR)
+var2wVAR = (sigma.fVAR^2)[2] + ((1+garch.parVAR[2])^2)*(sigma.fVAR^2)[1]
+
+# Calculating 1% and 99% VaR
+mean2wVAR + qnorm(0.99)*sqrt(var2wVAR)
+mean2wVAR + qnorm(0.01)*sqrt(var2wVAR)
+
+# Calculating 5% and 95% VaR
+mean2wVAR + qnorm(0.95)*sqrt(var2wVAR)
+mean2wVAR + qnorm(0.05)*sqrt(var2wVAR)
+
+# Calculating 10% and 90% VaR
+mean2wVAR + qnorm(0.9)*sqrt(var2wVAR)
+mean2wVAR + qnorm(0.1)*sqrt(var2wVAR)
+
+############################# reestimate model ############################# - NVDA
+# Re-estimate the GJR-GARCH model using the estimation dataset
+garch.specVAR = ugarchspec(mean.model = list(armaOrder = c(1, 0), include.mean = TRUE, archm = TRUE),
+                                       variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "std")
+garch.fitVAR = ugarchfit(spec=garch.specVAR, data=rNVDA, solver = "solnp", solver.control = list(ftol_rel=1e-11,xtol_rel=1e-11, maxeval=10000))
+
+garch.foreVAR = ugarchforecast(garch.fitVAR, n.ahead = 2)
+
+# Get forecasted mean and parameters
+garch.mean.fVAR = fitted(garch.foreVAR)
+garch.parVAR = coef(garch.fitVAR)
+sigma.fVAR = sigma(garch.foreVAR)
+variance.f.VAR = sigma.fVAR^2
+
+# Calculate the mean and variance for 2 weeks
+mean2wVAR   = sum(garch.mean.fVAR)
+var2wVAR = (sigma.fVAR^2)[2] + ((1+garch.parVAR[2])^2)*(sigma.fVAR^2)[1]
+
+# Calculating 1% and 99% VaR
+mean2wVAR + qt(0.99, 5.883742)*sqrt(var2wVAR)
+mean2wVAR + qt(0.01, 5.883742)*sqrt(var2wVAR)
+
+# Calculating 5% and 95% VaR
+mean2wVAR + qt(0.95, 5.883742)*sqrt(var2wVAR)
+mean2wVAR + qt(0.05, 5.883742)*sqrt(var2wVAR)
+
+# Calculating 10% and 90% VaR
+mean2wVAR + qt(0.90, 5.883742)*sqrt(var2wVAR)
+mean2wVAR + qt(0.1, 5.883742)*sqrt(var2wVAR)
+
+############################# reestimate model ############################# - BRKB
+# Re-estimate the GJR-GARCH model using the estimation dataset
+garch.specVAR = ugarchspec(mean.model = list(armaOrder = c(1, 0), include.mean = TRUE),
+                                       variance.model = list(model = "gjrGARCH", garchOrder = c(1,1)),
+                                       distribution.model = "norm")
+garch.fitVAR = ugarchfit(spec=garch.specVAR, data=rBRK, solver = "solnp", solver.control = list(ftol_rel=1e-11,xtol_rel=1e-11, maxeval=10000))
+
+garch.foreVAR = ugarchforecast(garch.fitVAR, n.ahead = 2)
+
+# Get forecasted mean and parameters
+garch.mean.fVAR = fitted(garch.foreVAR)
+garch.parVAR = coef(garch.fitVAR)
+sigma.fVAR = sigma(garch.foreVAR)
+variance.f.VAR = sigma.fVAR^2
+
+# Calculate the mean and variance for 2 weeks
+mean2wVAR   = sum(garch.mean.fVAR)
+var2wVAR = (sigma.fVAR^2)[2] + ((1+garch.parVAR[2])^2)*(sigma.fVAR^2)[1]
+
+# Calculating 1% and 99% VaR
+mean2wVAR + qnorm(0.99)*sqrt(var2wVAR)
+mean2wVAR + qnorm(0.01)*sqrt(var2wVAR)
+
+# Calculating 5% and 95% VaR
+mean2wVAR + qnorm(0.95)*sqrt(var2wVAR)
+mean2wVAR + qnorm(0.05)*sqrt(var2wVAR)
+
+# Calculating 10% and 90% VaR
+mean2wVAR + qnorm(0.9)*sqrt(var2wVAR)
+mean2wVAR + qnorm(0.1)*sqrt(var2wVAR)
+```
+
+```{r implied _vol}
+#| echo: false
+#| message: false
+#| warning: false
+#| output: false
+# AAPL
+AAPL_K = c(160,165, 170, 175, 180,185, 190)
+AAPL_IV = c(0.2155, 0.2054, 0.19501, 0.18296, 0.16655, 0.16218, 0.17141)
+AAPL_delta = c(0.94872, 0.86475, 0.70373, 0.46905, 0.2182, 0.06832, 0.02069)
+AAPL_options = cbind(AAPL_K, AAPL_IV, AAPL_delta)
+
+# MSFT
+MSFT_K = c(285, 290, 295, 300, 305, 310, 315, 320, 325, 330, 335, 340)
+MSFT_IV = c(0.22646, 0.21179, 0.19115, 0.18913, 0.20278, 0.20286, 0.17777, 0.17821, 0.17644, 0.17988, 0.18247, 0.17523)
+MSFT_delta = c(0.94377, 0.91317, 0.87265, 0.78508, 0.65833, 0.53247, 0.38975, 0.2614, 0.15775, 0.09185, 0.04992, 0.01971)
+MSFT_options = cbind(MSFT_K, MSFT_IV, MSFT_delta)
+
+# AMZN
+AMZN_K = c(101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114,115,116)
+AMZN_IV = c(0.37231, 0.32772, 0.33043, 0.32062, 0.33548,0.32284, 0.30741, 0.30323, 0.30298, 0.30076, 0.29432, 0.29281, 0.29195, 0.28887, 0.28582, 0.28443)
+
+AMZN_delta = c(0.89015, 0.8962, 0.87081, 0.85075, 0.82427, 0.78603, 0.75934, 0.72170, 0.67883, 0.63444, 0.58874, 0.53996, 0.49059, 0.44084, 0.39141, 0.34409)
+AMZN_options = cbind(AMZN_K, AMZN_IV, AMZN_delta)
+
+# NVDA
+NVDA_K = c(260, 265, 270, 275, 280, 285, 290, 295, 300, 305, 310)
+NVDA_IV = c(0.53751, 0.50810, 0.51753, 0.51061, 0.50988, 0.52688, 0.53292, 0.50337, 0.52156, 0.49370, 0.50331
+)
+NVDA_delta = c(0.78959, 0.75537, 0.70335, 0.65292, 0.59857, 0.54335, 0.49050, 0.43211, 0.38517, 0.32571,  0.28351)
+NVDA_options = cbind(NVDA_K, NVDA_IV, NVDA_delta)
+
+# BRK
+BRKB_K = c(300,305,310,315,320,325,330,335,340)
+BRKB_IV = c(0.2415,	0.2123,	0.1983,	0.1852,	0.1725,	0.1624,	0.1495,	0.1365,	0.1404)
+BRKB_delta = c(0.90917,	0.88238,	0.82269,	0.7349,	0.61411,	0.46316,	0.29825,	0.14862,	0.07318)
+BRK_options = cbind(BRKB_K, BRKB_IV, BRKB_delta)
+```
+
+Another application of our results is in volatility arbitraging. An option's price is determined by the underlying security price, strike price, implied volatility, risk free rate, and time to maturity. Recognising that the strike price is constant, changes in maturity is deterministic, and it is generally unlikely for there to big changes in risk free rate, an option's price will mainly be affected by changes in the underlying security's price and implied volatility. The chart below shows the implied volatility of each stock's options at various strike prices, using information from NASDAQ's website. The stock price at 5 May 2023 is marked by the vertical line. Analysis will be focused on at the money option as they are the most sensitive to changes in volatility.
+
+```{r plot_implied_vol}
+#| echo: false
+#| message: false
+#| warning: false
+#| fig-height: 2.25
+#| fig-width: 8
+par(mfrow=c(1,3))
+plot(AAPL_options[,'AAPL_K'], AAPL_options[, 'AAPL_IV'], main="AAPL options", xlab="Stike Price",ylab="Implied Volatility", type='l', col=qaf2)
+abline(v=173.57)
+
+plot(MSFT_options[,'MSFT_K'], MSFT_options[, 'MSFT_IV'], main="MSFT options", xlab="Stike Price",ylab="Implied Volatility", type='l', col=qaf3)
+abline(v=310.65)
+
+plot(AMZN_options[,'AMZN_K'], AMZN_options[, 'AMZN_IV'], main="AMZN options", xlab="Stike Price",ylab="Implied Volatility", type='l', col=qaf4)
+abline(v=105.66)
+
+par(mfrow=c(1,3))
+plot(NVDA_options[,'NVDA_K'], NVDA_options[, 'NVDA_IV'], main="NVDA options", xlab="Stike Price",ylab="Implied Volatility", type='l', col=qaf5)
+abline(v=286.8)
+
+plot(BRK_options[,'BRKB_K'], BRK_options[, 'BRKB_IV'], main="BRK-B options", xlab="Stike Price",ylab="Implied Volatility", type='l', col=qaf6)
+abline(v=323.88)
+
+```
+
+```{r analysis}
+#| echo: false
+#| message: false
+#| warning: false
+#| output: false
+# AAPL 173.57
+exp(AAPL[6111])
+# MSFT 310.65
+exp(MSFT[6111])
+# AMZN 105.66
+exp(AMZN[6111])
+# NVDA 286.8
+exp(NVDA[6111])
+# BRK-B 323.88
+exp(BRK[6111])
+
+# Use at the money option as they have highest vega, most sensitive to changes in volatility
+# AAPL options implied vol lower
+AAPL_options[4, 2] - sqrt(52)*0.03966
+# MSFT options implied vol lower
+MSFT_options[6, 2] - sqrt(52)*0.03639
+# AMZN options implied vol lower
+AMZN_options[5, 2] - sqrt(52)*0.0541
+# NVDA options implied vol higher
+NVDA_options[6, 2] - sqrt(52)*0.05848
+# BRK options implied vol lower
+BRK_options[6, 2] - sqrt(52)*0.02382
+
+# Delta
+AAPL_options[4, 3] 
+# MSFT options implied vol lower
+MSFT_options[6, 3] 
+# AMZN options implied vol lower
+AMZN_options[5, 3] 
+# NVDA options implied vol higher
+NVDA_options[6, 3] 
+# BRK options implied vol lower
+BRK_options[6, 3] 
+
+```
+
++------------------------------------+------------+-------------+-------------+-----------+--------------+
+|                                    | AAPL       | MSFT        | AMZN        | NVDA      | BRK-B        |
++:==================================:+:==========:+:===========:+:===========:+:=========:+:============:+
+| $\Delta$                           | 0.46905    | 0.53247     | 0.82427     | 0.54335   | 0.46316      |
++------------------------------------+------------+-------------+-------------+-----------+--------------+
+| Implied volatility                 | 0.18296    | 0.20286     | 0.33548     | 0.52688   | 0.1624       |
++------------------------------------+------------+-------------+-------------+-----------+--------------+
+| Forecasted volatility (annualised) | 0.2859923  | 0.262412    | 0.3901206   | 0.4217053 | 0.1717685    |
++------------------------------------+------------+-------------+-------------+-----------+--------------+
+| Difference                         | -0.1030323 | -0.05955202 | -0.05464065 | 0.1051747 | -0.009368463 |
++------------------------------------+------------+-------------+-------------+-----------+--------------+
+
+*Note. Data from NASDAQ Option Chains Greek. (https://www.nasdaq.com/).*
+
+First, we find that as of 5 May 2023, the implied volatility of at the money AAPL, MSFT, AMZN, and BRK-B options maturing on 2 June 2023 are lower than the forecasted volatility of our GARCH models. The forecasts predict that current implied volatility is too low, and it should increase over the next 4 weeks. This means that the options are potentially underpriced. However, as BRK-B's forecasted volatility is only 0.9 basis points higher than implied volatility, it might be too risky to pursue a position in its options given there is a possibility that actual volatility might be slightly different than forecasted, and there are transaction costs. Hence, one can buy call options on AAPL, MSFT, and AMZN, and simultaneously short $\Delta$ number of shares to hedge our position and make it delta neutral. This ensures to the largest extent that the position is affected by changes in volatility only and not by underlying asset price changes. As of 5 May 2023, the $\Delta$ of AAPL, MSFT, and AMZN, are 0.46905, 0.53247 and 0.82427 respectively. This will be the number of shares shorted for each call option bought. However, as the underlying stock price changes over time, the $\Delta$ of the option changes. Hence, it is essential to adjust the hedge accordingly to maintain delta neutrality.
+
+For NVDA, the implied volatility is higher than our forecasted volatility in 4 weeks. This means that investors can sell at the money call options on NVDA expiring on 2 June 2023, in expectation that implied volatility will decrease over the next month and the option price will decrease. One can then buy the exact same option in 4 weeks at the lower price. Similarly, investors should also buy $\Delta$ NVDA shares for each call option sold, which is 0.54335 as at 5 May 2023, to make the position delta neutral. The hedge should again be adjusted accordingly to maintain delta neutrality over time.

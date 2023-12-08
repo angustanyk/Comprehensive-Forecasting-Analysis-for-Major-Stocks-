@@ -1,0 +1,1266 @@
+---
+title: "QAF1 Assignment 1 - Forecasting Stock Prices"
+author: 
+  - name: "Chee Shuen Ng (1166317)" 
+  - name: "Ye Kai Tan (1164112)"
+  - name: "Yibo Pei (1315983)"
+  
+format:
+  pdf:
+    fontfamily: cmbright
+    fontsize: 10pt
+    geometry: 
+      - top = 5mm
+      - left = 5mm
+      - right = 5mm
+      - bottom = 5mm
+    fig-alin: center
+    header-includes:
+      - \usepackage{setspace}
+      - \setstretch{0.95}
+      
+editor: visual
+---
+
+## Abstract
+
+This report endeavors to forecast stock price movements of Apple Inc. (AAPL), NVIDIA Corporation (NVDA), Microsoft Corporation (MSFT), Berkshire Hathaway Inc. (BRK-B), and Amazon.com, Inc. (AMZN) over the next month, using 1000 weekly stock price observations from 2 February 2004 to 27 March 2023.
+
+Visual inspection of the time series plot and the Augmented Dickey-Fuller (ADF) test confirms that the five series are unit root non-stationary, and are integrated of order 1. An autoregressive (AR) model or random walk with drift could capture and forecast this dynamic. The slow decay in sample autocorrelation also suggests an autoregressive structure in the selected stocks.
+
+Subsequently, the Akaike Information Criterion was used to select the optimal lag order for AR models of the selected stocks. Random walk with drift models and linear regressions of stock prices on the NASDAQ Composite Index were also created. Residual diagnostics are conducted to assess the adequacy of these models, where we found that the selected AR models do not exhibit residual autocorrelation. However, the random walk with drift models for MSFT and BRK-B and all linear regressions exhibit residual autocorrelation. Residual autocorrelation is not a substantial issue for the linear regressions as it does not bias the estimates, but it suggests the random walk with drift model does not account for the dependence in MSFT and BRK-B adequately. In addition, the residuals of all models are heteroskedastic and non-normal.
+
+Next, the forecasts produced by the AR models and linear regressions were computed and combined. The forecasts produced by random walk with drift were not used as they were similar to the AR forecasts but have higher forecast errors. The linear regressions were used as the adjusted $R^2$ of the models are at least 85%, suggesting that the NASDAQ index is very informative in explaining variations in stock prices. The combined forecasts produced the lowest forecast errors and narrowest forecast intervals.
+
+Finally, the Generalized Supremum ADF test was conducted to offer deeper insights into stock price behavior. Bubble like behaviour was detected in all five stocks.
+
+## Characterising data
+
+### 1) Visual inspection of the properties of our data
+
+The graph below plots the time series of the log transformed prices of the five stocks selected:
+
+```{r packages}
+#| echo: false
+#| warning: false
+#| message: false
+rm(list = ls())
+library(FinTS) # for autocortest
+library(fUnitRoots) # for adf test
+library(tseries) # for Jarque Bera test
+library(AER)
+```
+
+```{r stock data}
+#| echo: false
+#| message: false
+# Download Apple's stock prices
+AAPL_yahoo        = "https://query1.finance.yahoo.com/v7/finance/download/AAPL?period1=1075680000&period2=1679961600&interval=1wk&events=history&includeAdjustedClose=true"
+AAPL_download     = read.csv(AAPL_yahoo)
+# Transform series into log levels
+AAPL          = xts::xts(log(AAPL_download[,6]), as.Date(AAPL_download[,1]))
+dates_AAPL             = zoo::index(AAPL)
+
+# Microsoft
+MSFT_yahoo        = "https://query1.finance.yahoo.com/v7/finance/download/MSFT?period1=1075680000&period2=1679961600&interval=1wk&events=history&includeAdjustedClose=true"
+MSFT_download     = read.csv(MSFT_yahoo)
+MSFT         = xts::xts(log(MSFT_download[,6]), as.Date(MSFT_download[,1]))
+dates_MSFT             = zoo::index(MSFT)
+
+# Amazon
+AMZN_yahoo        = "https://query1.finance.yahoo.com/v7/finance/download/AMZN?period1=1075680000&period2=1679961600&interval=1wk&events=history&includeAdjustedClose=true"
+AMZN_download     = read.csv(AMZN_yahoo)
+AMZN          = xts::xts(log(AMZN_download[,6]), as.Date(AMZN_download[,1]))
+dates_AMZN             = zoo::index(AMZN)
+
+# Nvidia
+NVDA_yahoo        = "https://query1.finance.yahoo.com/v7/finance/download/NVDA?period1=1075680000&period2=1679961600&interval=1wk&events=history&includeAdjustedClose=true"
+NVDA_download     = read.csv(NVDA_yahoo)
+NVDA        = xts::xts(log(NVDA_download[,6]), as.Date(NVDA_download[,1]))
+dates_NVDA             = zoo::index(NVDA)
+
+# Berkshire Hathaway
+BRK_yahoo        = "https://query1.finance.yahoo.com/v7/finance/download/BRK-B?period1=1075680000&period2=1679961600&interval=1wk&events=history&includeAdjustedClose=true"
+BRK_download     = read.csv(BRK_yahoo)
+BRK          = xts::xts(log(BRK_download[,6]), as.Date(BRK_download[,1]))
+dates_BRK            = zoo::index(BRK)
+```
+
+```{r plot time series}
+#| echo: false
+#| message: false
+#| fig-height: 5
+#| fig-width: 12
+
+# Define colors
+qaf1 = "#17252A"
+qaf2 = "#2B7A28"
+qaf3 = "#3AAFA9"
+qaf4 = "#0099FF"
+qaf5 = "#FF00FF"
+qaf6 = "#9966CC"
+
+qaf2.rgb     = col2rgb(qaf2)
+qaf2.shade1 = rgb(qaf2.rgb[1],qaf2.rgb[2],qaf2.rgb[3], alpha=100, maxColorValue=255)
+qaf2.shade2 = rgb(qaf2.rgb[1],qaf2.rgb[2],qaf2.rgb[3], alpha=80, maxColorValue=255)
+
+qaf3.rgb     = col2rgb(qaf3)
+qaf3.shade1 = rgb(qaf3.rgb[1],qaf3.rgb[2],qaf3.rgb[3], alpha=100, maxColorValue=255)
+qaf3.shade2 = rgb(qaf3.rgb[1],qaf3.rgb[2],qaf3.rgb[3], alpha=80, maxColorValue=255)
+
+qaf4.rgb     = col2rgb(qaf4)
+qaf4.shade1 = rgb(qaf4.rgb[1],qaf4.rgb[2],qaf4.rgb[3], alpha=100, maxColorValue=255)
+qaf4.shade2 = rgb(qaf4.rgb[1],qaf4.rgb[2],qaf4.rgb[3], alpha=80, maxColorValue=255)
+
+qaf5.rgb     = col2rgb(qaf5)
+qaf5.shade1 = rgb(qaf5.rgb[1],qaf5.rgb[2],qaf5.rgb[3], alpha=100, maxColorValue=255)
+qaf5.shade2 = rgb(qaf5.rgb[1],qaf5.rgb[2],qaf5.rgb[3], alpha=80, maxColorValue=255)
+
+qaf6.rgb     = col2rgb(qaf6)
+qaf6.shade1 = rgb(qaf6.rgb[1],qaf6.rgb[2],qaf6.rgb[3], alpha=100, maxColorValue=255)
+qaf6.shade2 = rgb(qaf6.rgb[1],qaf6.rgb[2],qaf6.rgb[3], alpha=80, maxColorValue=255)
+
+# calculate autocorrelation in our data
+AAPL.acf   = acf(as.vector(AAPL),lag.max=20,plot=FALSE)
+MSFT.acf  = acf(as.vector(MSFT),lag.max=20,plot=FALSE)
+AMZN.acf     = acf(as.vector(AMZN),lag.max=20,plot=FALSE)
+NVDA.acf  = acf(as.vector(NVDA),lag.max=20,plot=FALSE)
+BRK.acf  = acf(as.vector(BRK),lag.max=20,plot=FALSE)
+
+par(mar=c(4,4,1,1))
+# plot the time series of stock prices 
+plot(x=dates_AAPL, y=as.vector(AAPL), type="l", bty="n", col=qaf2, lwd=2, main="Log weekly prices from 02/02/2004 to 27/03/2023", ylab="natural logarithm of prices", xlab="dates", ylim=range(AAPL, MSFT, AMZN, NVDA, BRK))
+
+lines(x=dates_MSFT, y=as.vector(MSFT), type="l", bty="n", col=qaf3, lwd=2, ylim=range(AAPL, MSFT, AMZN, NVDA, BRK))
+
+lines(x=dates_AMZN, y=as.vector(AMZN), type="l", bty="n", col=qaf4, lwd=2, ylim=range(AAPL, MSFT, AMZN, NVDA, BRK))
+
+lines(x=dates_NVDA, y=as.vector(NVDA), type="l", bty="n", col=qaf5, lwd=2, ylim=range(AAPL, MSFT, AMZN, NVDA, BRK))
+
+lines(x=dates_BRK, y=as.vector(BRK), type="l", bty="n", col=qaf6, lwd=2, ylim=range(AAPL, MSFT, AMZN, NVDA, BRK))
+
+legend("bottomright", legend=c("AAPL","MSFT", "AMZN", "NVDA", "BRK-B"), lwd=c(2,2,2,2,2), col=c(qaf2,qaf3,qaf4,qaf5, qaf6, bty="n"))
+```
+
+The time series shows that the logarithm of weekly prices exhibit a positive trend, with no apparent fixed mean value. This suggests that stock prices could be unit root non-stationary. This will be formally tested using the Augmented Dickey Fuller (ADF) test. The graphs below show the sample autocorrelation of the selected stocks at up to 20 lags:
+
+```{r plot autocorrelogram of time series}
+#| echo: false
+#| message: false
+#| fig-height: 2.25
+#| fig-width: 8
+
+par(mar = c(4,4,1.5,2), mfrow=c(1,3))
+# plot autocorrelogram 
+plot(x=1:20, y=AAPL.acf$acf[2:21], type="h", ylim=c(-0.1,1), main = "log(AAPL)", xlab="lag", ylab="acf", bty="l",lwd=2, col=qaf2)
+abline(h=0)
+plot(x=1:20, y=MSFT.acf$acf[2:21], type="h", ylim=c(-0.1,1), main = "log(MSFT)", xlab="lag", ylab="acf", bty="l",lwd=2, col=qaf3)
+abline(h=0)
+plot(x=1:20, y=AMZN.acf$acf[2:21], type="h", ylim=c(-0.1,1), main = "log(AMZN)", xlab="lag", ylab="acf", bty="l",lwd=2, col=qaf4)
+abline(h=0)
+
+par(mar = c(4,4,1.5,2), mfrow=c(1,3))
+plot(x=1:20, y=NVDA.acf$acf[2:21], type="h", ylim=c(-0.1,1), main = "log(NVDA)", xlab="lag", ylab="acf", bty="l",lwd=2, col=qaf5)
+abline(h=0)
+plot(x=1:20, y=BRK.acf$acf[2:21], type="h", ylim=c(-0.1,1), main = "log(BRK-B)", xlab="lag", ylab="acf", bty="l",lwd=2, col=qaf6)
+abline(h=0)
+```
+
+The sample autocorrelations show that there is strong memory in stock prices that is decaying slowly, with correlations still above 0.9 at 20 lags. This suggests an autoregressive structure in stock prices that can potentially be exploited for forecasting.
+
+### 2) Augmented Dickey Fuller Test for unit root non stationarity and integration order
+
+The ADF test is a test of unit root non-stationarity for an AR(p) model. The null hypothesis is that the time series is unit root non-stationary, while the alternative hypothesis is that the time series is unit root stationary. If the null hypothesis fails to be rejected, the ADF test is performed again on the differentiated series. The number of differentiation it takes for the null hypothesis to be rejected is the integration order of the series. The ADF test statistics and p-values are summarised in Table 1. The lag order of the models tested are selected using the Akaike Information Criterion (AIC).
+
+```{r integration order}
+#| echo: false
+#| message: false
+#| warning: false
+#| results: hide
+# AAPL
+ar(AAPL, aic=TRUE, order.max =30, method="ols")
+AAPL.ar    = ar(AAPL, order.max=1, aic=FALSE, method="ols")
+AutocorTest(as.vector(AAPL.ar$resid), lag=30, type="Ljung-Box")
+adf.AAPL.ct   = adfTest(AAPL, lags=1, type="ct")
+adf.AAPL.c    = adfTest(AAPL, lags=1, type="c")
+adf.dAAPL.c    = adfTest(diff(AAPL), lags=1, type="c")
+
+# MSFT
+ar(MSFT, aic=TRUE, method="ols")
+MSFT.ar = ar(MSFT, order.max=2, aic=FALSE, method="ols")
+AutocorTest(as.vector(MSFT.ar$resid), lag=30, type="Ljung-Box")
+adf.MSFT.ct   = adfTest(MSFT, lags=2, type="ct")
+adf.MSFT.c    = adfTest(diff(MSFT), lags=1, type="c")
+
+# AMZN
+ar(AMZN, aic=TRUE, method="ols")
+AMZN.ar    = ar(AMZN, order.max=1, aic=FALSE, method="ols")
+AutocorTest(as.vector(AMZN.ar$resid), lag=30, type="Ljung-Box")
+adf.AMZN.ct   = adfTest(AMZN, lags=1, type="ct")
+adf.AMZN.c    = adfTest(diff(AMZN), lags=1, type="c")
+
+# NVDA
+ar(NVDA, aic=TRUE, method="ols")
+NVDA.ar    = ar(NVDA, order.max=30, aic=FALSE, method="ols")
+AutocorTest(as.vector(NVDA.ar$resid), lag=30, type="Ljung-Box")
+adf.NVDA.ct   = adfTest(NVDA, lags=30, type="ct")
+adf.NVDA.c    = adfTest(diff(NVDA), lags=29, type="c")
+
+# BRK
+ar(BRK, aic=TRUE, method="ols")
+BRK.ar    = ar(BRK, order.max=16, aic=FALSE, method="ols")
+AutocorTest(as.vector(BRK.ar$resid), lag=30, type="Ljung-Box")
+adf.BRK.ct   = adfTest(BRK, lags=16, type="ct")
+adf.BRK.c    = adfTest(diff(BRK), lags=15, type="c")
+
+# ADF test for data
+round(matrix(c(adf.AAPL.ct@test$statistic, adf.AAPL.ct@test$p.value,
+               adf.AAPL.c@test$statistic, adf.AAPL.c@test$p.value,
+               adf.dAAPL.c@test$statistic, adf.dAAPL.c@test$p.value,
+               adf.MSFT.ct@test$statistic, adf.MSFT.ct@test$p.value,
+               adf.MSFT.c@test$statistic, adf.MSFT.c@test$p.value,
+               adf.AMZN.ct@test$statistic, adf.AMZN.ct@test$p.value,
+               adf.AMZN.c@test$statistic, adf.AMZN.c@test$p.value,
+               adf.NVDA.ct@test$statistic, adf.NVDA.ct@test$p.value,
+               adf.NVDA.c@test$statistic, adf.NVDA.c@test$p.value,
+               adf.BRK.ct@test$statistic, adf.BRK.ct@test$p.value,
+               adf.BRK.c@test$statistic, adf.BRK.c@test$p.value),
+             ncol = 2, byrow = TRUE), 3)
+
+```
+
++--------------------+---------------------+-------------+--------------------+-------------+
+| Series             | Deterministic Terms | Lag Order   | ADF Test Statistic | p-value     |
++:==================:+:===================:+:===========:+:==================:+:===========:+
+| log(AAPL)          | constant, trend     | 1           | -3.717             | 0.023       |
++--------------------+---------------------+-------------+--------------------+-------------+
+| log(AAPL)          | constant            | 1           | -2.345             | 0.184       |
++--------------------+---------------------+-------------+--------------------+-------------+
+| $\Delta$log(AAPL)  | constant            | 1           | -21.877            | 0.010       |
++--------------------+---------------------+-------------+--------------------+-------------+
+| log(MSFT)          | constant, trend     | 2           | -1.647             | 0.728       |
++--------------------+---------------------+-------------+--------------------+-------------+
+| $\Delta$log(MSFT)  | constant            | 1           | -24.480            | 0.010       |
++--------------------+---------------------+-------------+--------------------+-------------+
+| log(AMZN)          | constant, trend     | 1           | -2.834             | 0.225       |
++--------------------+---------------------+-------------+--------------------+-------------+
+| $\Delta$log(AMZN)  | constant            | 1           | -22.152            | 0.010       |
++--------------------+---------------------+-------------+--------------------+-------------+
+| log(NVDA)          | constant, trend     | 30          | -1.221             | 0.903       |
++--------------------+---------------------+-------------+--------------------+-------------+
+| $\Delta$log(NVDA)  | constant            | 29          | -6.098             | 0.010       |
++--------------------+---------------------+-------------+--------------------+-------------+
+| log(BRK-B)         | constant, trend     | 16          | -3.126             | 0.102       |
++--------------------+---------------------+-------------+--------------------+-------------+
+| $\Delta$log(BRK-B) | constant            | 15          | -7.462             | 0.010       |
++--------------------+---------------------+-------------+--------------------+-------------+
+
+: Integration order test results
+
+The results show that log-transformed MSFT, AMZN, NVDA, and BRK-B stock prices are integrated of order 1, since the null hypothesis of unit root non-stationarity is rejected when the first difference of the stocks are tested. The conclusion is less clear for log-transformed AAPL prices (log(AAPL)). When a constant and a trend are included as deterministic terms of the ADF test model, the null hypothesis that log(AAPL) is unit root non-stationary is rejected at the 5% level. However, when only a constant is included, the null hypothesis of unit root non-stationarity is not rejected. Evidence of unit root non stationarity also disappears when log(AAPL) is differentiated. Given the trend observed in the log(AAPL) time series and its extremely slowly decaying autocorrelation, it is concluded that log(AAPL) is integrated of order 1. This requires further confirmation, but the necessary tools are currently unavailable.
+
+For unit root non-stationary data, the forecasts become increasingly uncertain as the forecast horizon increases as the forecast intervals of a non-stationary time series increase without bound. The forecasts and forecast error variances of a non-stationary model do not converge to the unconditional mean and variances of the autoregressive model with increasing forecast horizon. Hence, forecasting weekly data over the next month would be a better choice as it allows us to forecast evolution in stock prices without an overly extended forecast horizon (4 compared to 30).
+
+## Forecasting
+
+### 1) Selection of autoregressive models
+
+The slow decay in sample autocorrelation suggests an autoregressive structure in the series of selected stock prices. AIC would be used to select the optimal lag order of autoregressions for forecasting the stock prices over the next month. The coefficient estimates of the AR models are not reported as some models have up to 30 lags, which takes too much space to report neatly. AIC selected an AR(1) model for log(AAPL), an AR(2) model for log(MSFT), an AR(1) model for log(AMZN), an AR(30) model for log(NVDA), and an AR(16) model for log(BRK-B). Table 2 summarises the residual diagnostics of the AR models selected by AIC:
+
+```{r AR model selection for forecasting}
+#| echo: false
+#| message: false
+#| results: hide
+# First need to choose the appropriate AR model and report residual diagnostics.  
+ar(AAPL, aic=TRUE, order.max=30, method = "ols")
+AAPL.ar     = ar(AAPL, order.max=1, aic=FALSE, method="ols")
+AAPL.lb     = AutocorTest(as.vector(AAPL.ar$resid), lag=30, type="Ljung-Box")
+# ARCH LM test for heteroskedasticity
+AAPL.arch   = ArchTest(na.omit(AAPL.ar$resid), lags=30)
+# test whether residuals are normall distributed
+AAPL.jb     = jarque.bera.test(na.omit(AAPL.ar$resid))
+ 
+ar(MSFT, aic=TRUE, order.max=30, method = "ols")
+MSFT.ar     = ar(MSFT, order.max=2, aic=FALSE, method="ols")
+MSFT.lb     = AutocorTest(MSFT.ar$resid, lag=30, type="Ljung-Box")
+# ARCH LM test for heteroskedasticity
+MSFT.arch   = ArchTest(na.omit(MSFT.ar$resid), lags=30)
+# test whether residuals are normall distributed
+MSFT.jb     = jarque.bera.test(na.omit(MSFT.ar$resid))
+
+ar(AMZN, aic=TRUE, order.max=30, method = "ols")
+AMZN.ar     = ar(AMZN, order.max=1, aic=FALSE, method="ols")
+AMZN.lb     = AutocorTest(AMZN.ar$resid, lag=30, type="Ljung-Box")
+# ARCH LM test for heteroskedasticity
+AMZN.arch   = ArchTest(na.omit(AMZN.ar$resid), lags=30)
+# test whether residuals are normall distributed
+AMZN.jb     = jarque.bera.test(na.omit(AMZN.ar$resid))
+
+ar(NVDA, aic=TRUE, order.max=30, method = "ols")
+NVDA.ar     = ar(NVDA, order.max=30, aic=FALSE, method="ols")
+NVDA.lb     = AutocorTest(NVDA.ar$resid, lag=30, type="Ljung-Box")
+# ARCH LM test for heteroskedasticity
+NVDA.arch   = ArchTest(na.omit(NVDA.ar$resid), lags=30)
+# test whether residuals are normall distributed
+NVDA.jb     = jarque.bera.test(na.omit(NVDA.ar$resid))
+
+ar(BRK, aic=TRUE, order.max=30, method = "ols")
+BRK.ar     = ar(BRK, order.max=16, aic=FALSE, method="ols")
+BRK.lb     = AutocorTest(BRK.ar$resid, lag=30, type="Ljung-Box")
+# ARCH LM test for heteroskedasticity
+BRK.arch   = ArchTest(na.omit(BRK.ar$resid), lags=30)
+# test whether residuals are normall distributed
+BRK.jb     = jarque.bera.test(na.omit(BRK.ar$resid))
+
+round(matrix(c(
+               AAPL.lb$statistic, MSFT.lb$statistic, AMZN.lb$statistic, NVDA.lb$statistic, BRK.lb$statistic, 
+               AAPL.lb$p.value, MSFT.lb$p.value, AMZN.lb$p.value, NVDA.lb$p.value, BRK.lb$p.value, 
+               AAPL.arch$statistic, MSFT.arch$statistic, AMZN.arch$statistic, NVDA.arch$statistic, BRK.arch$statistic, 
+               AAPL.arch$p.value, MSFT.arch$p.value, AMZN.arch$p.value, NVDA.arch$p.value, BRK.arch$p.value,
+               AAPL.jb$statistic, MSFT.jb$statistic, AMZN.jb$statistic, NVDA.jb$statistic, BRK.jb$statistic, 
+               AAPL.jb$p.value, MSFT.jb$p.value, AMZN.jb$p.value, NVDA.jb$p.value, BRK.jb$p.value
+               ),
+             ncol = 5, byrow = TRUE), 3)
+```
+
++----------+-----------+-----------+-----------+-----------+------------+
+|          | log(AAPL) | log(MSFT) | log(AMZN) | log(NVDA) | log(BRK-B) |
++:========:+:=========:+:=========:+:=========:+:=========:+:==========:+
+| Q(30)    | 39.792    | 31.410    | 21.696    | 2.332     | 27.417     |
++----------+-----------+-----------+-----------+-----------+------------+
+| p-value  | 0.109     | 0.395     | 0.865     | 1.000     | 0.601      |
++----------+-----------+-----------+-----------+-----------+------------+
+| ARCH(30) | 45.794    | 86.996    | 59.774    | 113.815   | 199.834    |
++----------+-----------+-----------+-----------+-----------+------------+
+| p-value  | 0.033     | 0.000     | 0.001     | 0.000     | 0.000      |
++----------+-----------+-----------+-----------+-----------+------------+
+| JB       | 423.712   | 515.084   | 453.681   | 429.894   | 1615.166   |
++----------+-----------+-----------+-----------+-----------+------------+
+| p-value  | 0.000     | 0.000     | 0.000     | 0.000     | 0.000      |
++----------+-----------+-----------+-----------+-----------+------------+
+
+: Residual diagnostics of AR models chosen
+
+The results for the Ljung Box Test (rows 1 and 2) show that the null hypothesis of no serial autocorrelation in residuals fails to be rejected at the 5% level for all the chosen AR models. This suggests that the chosen models adequately account for the dependence in the data. The results of the ARCH-LM test (rows 3 and 4) provide evidence that the residuals of the chosen models exhibit heteroskedasticity. The results of the Jargue Bera test (rows 5 and 6) show that the null hypothesis of normally distributed residuals is rejected at the 5% level. Heteroskedasticity in the data should be modeled using an AR-GARCH model, and this will be further explored as the report is further developed in project 2. Modelling the time-varying volatility would also help determine whether non-normality in residuals is caused by heteroskedasticity.
+
+### 2) Forecasting using autoregression
+
+Table 3 presents the 4-periods-ahead forecasts for the 5 stocks using their respective AR models selected by AIC, with forecast errors shown in brackets. All of the AR models forecast an increase in stock prices over the next 4 weeks. Furthermore, as expected, the forecast errors increase as the forecasting horizon increases.
+
++-----------+-----------+-----------+-----------+-----------+------------+
+|           | log(AAPL) | log(MSFT) | log(AMZN) | log(NVDA) | log(BRK-B) |
++:=========:+:=========:+:=========:+:=========:+:=========:+:==========:+
+| 3/4/2023  | 5.0652    | 5.6286    | 4.5879    | 5.5813    | 5.7178     |
+|           |           |           |           |           |            |
+| (h=1)     | (0.0455)  | (0.0342)  | (0.0505)  | (0.0638)  | (0.0286)   |
++-----------+-----------+-----------+-----------+-----------+------------+
+| 10/4/2023 | 5.0661    | 5.6326    | 4.5905    | 5.6022    | 5.7206     |
+|           |           |           |           |           |            |
+| (h=2)     | (0.0643)  | (0.0454)  | (0.0713)  | (0.0927)  | (0.0376)   |
++-----------+-----------+-----------+-----------+-----------+------------+
+| 17/4/2023 | 5.0669    | 5.6371    | 4.5930    | 5.6259    | 5.7216     |
+|           |           |           |           |           |            |
+| (h=3)     | (0.0786)  | (0.0547)  | (0.0873)  | (0.1142)  | (0.0456)   |
++-----------+-----------+-----------+-----------+-----------+------------+
+| 24/4/2023 | 5.0677    | 5.6414    | 4.5955    | 5.6355    | 5.7234     |
+|           |           |           |           |           |            |
+| (h=4)     | (0.0907)  | (0.0626)  | (0.1008)  | (0.1332)  | (0.0514)   |
++-----------+-----------+-----------+-----------+-----------+------------+
+
+: 4-periods-ahead point forecast and forecast errors using AR
+
+The corresponding 95% forecasts intervals are presented in Table 4:
+
++-----------+--------------------+--------------------+--------------------+--------------------+--------------------+
+|           | log(AAPL)          | log(MSFT)          | log(AMZN)          | log(NVDA)          | log(BRK-B)         |
++:=========:+:==================:+:==================:+:==================:+:==================:+:==================:+
+| 3/4/2023  | \[4.9761, 5.1544\] | \[5.5616, 5.6956\] | \[4.4890, 4.6868\] | \[5.4562, 5.7063\] | \[5.6617, 5.7739\] |
+|           |                    |                    |                    |                    |                    |
+| (h=1)     |                    |                    |                    |                    |                    |
++-----------+--------------------+--------------------+--------------------+--------------------+--------------------+
+| 10/4/2023 | \[4.9401, 5.1920\] | \[5.5436, 5.7217\] | \[4.4506, 4.7303\] | \[5.4206, 5.7838\] | \[5.6469, 5.7943\] |
+|           |                    |                    |                    |                    |                    |
+| (h=2)     |                    |                    |                    |                    |                    |
++-----------+--------------------+--------------------+--------------------+--------------------+--------------------+
+| 17/4/2023 | \[4.9128, 5.2210\] | \[5.5299, 5.7443\] | \[4.4218, 4.7642\] | \[5.4021, 5.8498\] | \[5.6323, 5.8110\] |
+|           |                    |                    |                    |                    |                    |
+| (h=3)     |                    |                    |                    |                    |                    |
++-----------+--------------------+--------------------+--------------------+--------------------+--------------------+
+| 24/4/2023 | \[4.8900, 5.2454\] | \[5.5188, 5.7641\] | \[4.3979, 4.7931\] | \[5.3744, 5.8967\] | \[5.6227, 5.8242\] |
+|           |                    |                    |                    |                    |                    |
+| (h=4)     |                    |                    |                    |                    |                    |
++-----------+--------------------+--------------------+--------------------+--------------------+--------------------+
+
+: 4-periods-ahead 95% forecast intervals
+
+These forecast intervals have a 95% chance of containing the future values of the selected stocks. Due to increasing forecast error, the width of the forecast intervals increase as the forecasting horizon increases.
+
+```{r forecasting using AR}
+#| echo: false
+#| message: false
+#| results: hide
+h=4
+# AAPL
+AAPL.ar.fit = as.vector(AAPL - AAPL.ar$resid)
+AAPL.ar.f   = predict(AAPL.ar, n.ahead=4, se.fit=TRUE)
+dates.AAPL.tmp = seq(from = dates_AAPL[1000] + 7, to = dates_AAPL[1000] + h*7, by = 7)
+dates.AAPL     = c(dates_AAPL, dates.AAPL.tmp)
+
+AAPL.ar.fci = rbind(AAPL.ar.f$pred + qnorm(.975)*AAPL.ar.f$se, 
+                    AAPL.ar.f$pred + qnorm(.025)*AAPL.ar.f$se)
+
+# MSFT
+MSFT.ar.fit = as.vector(MSFT - MSFT.ar$resid)
+MSFT.ar.f   = predict(MSFT.ar, n.ahead=4, se.fit=TRUE)
+dates.MSFT.tmp = seq(from = dates_MSFT[1000] + 7, to = dates_MSFT[1000] + h*7, by = 7)
+dates.MSFT     = c(dates_MSFT, dates.MSFT.tmp)
+
+MSFT.ar.fci = rbind(MSFT.ar.f$pred + qnorm(.975)*MSFT.ar.f$se, 
+                    MSFT.ar.f$pred + qnorm(.025)*MSFT.ar.f$se)
+
+# AMZN
+AMZN.ar.fit = as.vector(AMZN - AMZN.ar$resid)
+AMZN.ar.f   = predict(AMZN.ar, n.ahead=4, se.fit=TRUE)
+dates.AMZN.tmp = seq(from = dates_AMZN[1000] + 7, to = dates_AMZN[1000] + h*7, by = 7)
+dates.AMZN     = c(dates_AMZN, dates.AMZN.tmp)
+
+AMZN.ar.fci = rbind(AMZN.ar.f$pred + qnorm(.975)*AMZN.ar.f$se, 
+                    AMZN.ar.f$pred + qnorm(.025)*AMZN.ar.f$se)
+
+# NVDA
+NVDA.ar.fit = as.vector(NVDA - NVDA.ar$resid)
+NVDA.ar.f   = predict(NVDA.ar, n.ahead=4, se.fit=TRUE)
+dates.NVDA.tmp = seq(from = dates_NVDA[1000] + 7, to = dates_NVDA[1000] + h*7, by = 7)
+dates.NVDA     = c(dates_NVDA, dates.NVDA.tmp)
+
+NVDA.ar.fci = rbind(NVDA.ar.f$pred + qnorm(.975)*NVDA.ar.f$se, 
+                    NVDA.ar.f$pred + qnorm(.025)*NVDA.ar.f$se)
+
+# BRK
+BRK.ar.fit = as.vector(BRK - BRK.ar$resid)
+BRK.ar.f   = predict(BRK.ar, n.ahead=4, se.fit=TRUE)
+dates.BRK.tmp = seq(from = dates_BRK[1000] + 7, to = dates_BRK[1000] + h*7, by = 7)
+dates.BRK     = c(dates_BRK, dates.BRK.tmp)
+
+BRK.ar.fci = rbind(BRK.ar.f$pred + qnorm(.975)*BRK.ar.f$se, 
+                    BRK.ar.f$pred + qnorm(.025)*BRK.ar.f$se)
+
+# Results
+AAPL.ar.fci
+MSFT.ar.fci
+AMZN.ar.fci
+NVDA.ar.fci
+BRK.ar.fci
+
+round(matrix(c(
+               AAPL.ar.f$pred[1], MSFT.ar.f$pred[1], AMZN.ar.f$pred[1], NVDA.ar.f$pred[1], BRK.ar.f$pred[1],
+               AAPL.ar.f$se[1], MSFT.ar.f$se[1], AMZN.ar.f$se[1], NVDA.ar.f$se[1], BRK.ar.f$se[1],
+               AAPL.ar.f$pred[2], MSFT.ar.f$pred[2], AMZN.ar.f$pred[2], NVDA.ar.f$pred[2], BRK.ar.f$pred[2],
+               AAPL.ar.f$se[2], MSFT.ar.f$se[2], AMZN.ar.f$se[2], NVDA.ar.f$se[2], BRK.ar.f$se[2],
+               AAPL.ar.f$pred[3], MSFT.ar.f$pred[3], AMZN.ar.f$pred[3], NVDA.ar.f$pred[3], BRK.ar.f$pred[3],
+               AAPL.ar.f$se[3], MSFT.ar.f$se[3], AMZN.ar.f$se[3], NVDA.ar.f$se[3], BRK.ar.f$se[3],
+               AAPL.ar.f$pred[4], MSFT.ar.f$pred[4], AMZN.ar.f$pred[4], NVDA.ar.f$pred[4], BRK.ar.f$pred[4],
+               AAPL.ar.f$se[4], MSFT.ar.f$se[4], AMZN.ar.f$se[4], NVDA.ar.f$se[4], BRK.ar.f$se[4]
+              ),
+             ncol = 5, byrow = TRUE), 4)
+```
+
+### 3) Constructing random walk with drift models and residual diagnostics
+
+Given the strong evidence of unit root non-stationarity in our data, a random walk with drift could potentially be used to forecast equity prices. The random walk with drift is as follows:
+
+```{=tex}
+\vspace{-20pt}
+\begin{align}
+log(AAPL_t) &= 0.0061 + log(AAPL_{t-1}) + u_t\\
+log(MSFT_t) &= 0.0028 + log(MSFT_{t-1}) + u_t\\
+log(AMZN_t) &= 0.0037 + log(AMZN_{t-1}) + u_t\\
+log(NVDA_t) &= 0.0050 + log(NVDA_{t-1}) + u_t\\
+log(BRK-B_t) &= 0.0016 + log(BRK-B_{t-1}) + u_t
+\end{align}
+```
+The first term on the right hand side is the intercept, and $u_t$ is the error term. As our data is unit root non-stationary, the intercept is interpreted as the slope of the time trend. A random walk with drift captures this unit root non-stationary process hovering around a deterministic time trend. Table 5 shows the residual diagnostic for the random walk with drift models:
+
+```{r random walk with drift}
+#| echo: false
+#| message: false
+#| results: hide
+T = length(AAPL)
+
+# estimate AAPL model
+AAPL.rw.resid   = c(NA, as.vector(AAPL[2:T]) - as.vector(AAPL[1:(T-1)]))
+AAPL.rw.fit = as.vector(AAPL - AAPL.rw.resid)
+AAPL.rw.mu0  = mean(na.omit(AAPL.rw.resid))
+AAPL.rw.sigma2  = sum(na.omit(AAPL.rw.resid)^2)/T
+# Ljung box test for autocorrelation in residuals
+AAPL.rw.lb = AutocorTest(AAPL.rw.resid, lag=13, type="Ljung-Box")
+# ARCH LM test for heteroskedasticity
+AAPL.rw.arch   = ArchTest(na.omit(AAPL.rw.resid), lags=13)
+# test whether residuals are normally distributed
+AAPL.rw.jb     = jarque.bera.test(na.omit(AAPL.rw.resid))
+
+# estimate MSFT model
+MSFT.rw.resid   = c(NA, as.vector(MSFT[2:T]) - as.vector(MSFT[1:(T-1)]))
+MSFT.rw.fit = as.vector(MSFT) - MSFT.rw.resid
+MSFT.rw.mu0  = mean(na.omit(MSFT.rw.resid))
+MSFT.rw.sigma2  = sum(na.omit(MSFT.rw.resid)^2)/T
+# Ljung box test for autocorrelation in residuals
+MSFT.rw.lb = AutocorTest(MSFT.rw.resid, lag=13, type="Ljung-Box")
+# ARCH LM test for heteroskedasticity
+MSFT.rw.arch   = ArchTest(na.omit(MSFT.rw.resid), lags=13)
+# test whether residuals are normally distributed
+MSFT.rw.jb     = jarque.bera.test(na.omit(MSFT.rw.resid))
+
+# estimate AMZN model
+AMZN.rw.resid   = c(NA, as.vector(AMZN[2:T]) - as.vector(AMZN[1:(T-1)]))
+AMZN.rw.fit = as.vector(AMZN) - AMZN.rw.resid
+AMZN.rw.mu0  = mean(na.omit(AMZN.rw.resid))
+AMZN.rw.sigma2  = sum(na.omit(AMZN.rw.resid)^2)/T
+# Ljung box test for autocorrelation in residuals
+AMZN.rw.lb = AutocorTest(AMZN.rw.resid, lag=13, type="Ljung-Box")
+# ARCH LM test for heteroskedasticity
+AMZN.rw.arch   = ArchTest(na.omit(AMZN.rw.resid), lags=13)
+# test whether residuals are normally distributed
+AMZN.rw.jb     = jarque.bera.test(na.omit(AMZN.rw.resid))
+
+# estimate NVDA model
+NVDA.rw.resid   = c(NA, as.vector(NVDA[2:T]) - as.vector(NVDA[1:(T-1)]))
+NVDA.rw.fit = as.vector(NVDA) - NVDA.rw.resid
+NVDA.rw.mu0  = mean(na.omit(NVDA.rw.resid))
+NVDA.rw.sigma2  = sum(na.omit(NVDA.rw.resid)^2)/T
+# Ljung box test for autocorrelation in residuals
+NVDA.rw.lb = AutocorTest(NVDA.rw.resid, lag=13, type="Ljung-Box")
+# ARCH LM test for heteroskedasticity
+NVDA.rw.arch   = ArchTest(na.omit(NVDA.rw.resid), lags=13)
+# test whether residuals are normally distributed
+NVDA.rw.jb     = jarque.bera.test(na.omit(NVDA.rw.resid))
+
+# estimate BRK model
+BRK.rw.resid   = c(NA, as.vector(BRK[2:T]) - as.vector(BRK[1:(T-1)]))
+BRK.rw.fit = as.vector(BRK) - BRK.rw.resid
+BRK.rw.mu0  = mean(na.omit(BRK.rw.resid))
+BRK.rw.sigma2  = sum(na.omit(BRK.rw.resid)^2)/T
+# Ljung box test for autocorrelation in residuals
+BRK.rw.lb = AutocorTest(BRK.rw.resid, lag=13, type="Ljung-Box")
+# ARCH LM test for heteroskedasticity
+BRK.rw.arch   = ArchTest(na.omit(BRK.rw.resid), lags=13)
+# test whether residuals are normally distributed
+BRK.rw.jb     = jarque.bera.test(na.omit(BRK.rw.resid)) 
+
+round(matrix(c(
+               AAPL.rw.lb$statistic, MSFT.rw.lb$statistic, AMZN.rw.lb$statistic, NVDA.rw.lb$statistic, BRK.rw.lb$statistic, 
+               AAPL.rw.lb$p.value, MSFT.rw.lb$p.value, AMZN.rw.lb$p.value, NVDA.rw.lb$p.value, BRK.rw.lb$p.value, 
+               AAPL.rw.arch$statistic, MSFT.rw.arch$statistic, AMZN.rw.arch$statistic, NVDA.rw.arch$statistic, BRK.rw.arch$statistic, 
+               AAPL.rw.arch$p.value, MSFT.rw.arch$p.value, AMZN.rw.arch$p.value, NVDA.rw.arch$p.value, BRK.rw.arch$p.value,
+               AAPL.rw.jb$statistic, MSFT.rw.jb$statistic, AMZN.rw.jb$statistic, NVDA.rw.jb$statistic, BRK.rw.jb$statistic, 
+               AAPL.rw.jb$p.value, MSFT.rw.jb$p.value, AMZN.rw.jb$p.value, NVDA.rw.jb$p.value, BRK.rw.jb$p.value
+               ),
+             ncol = 5, byrow = TRUE), 3)
+
+```
+
++----------+-----------+-----------+-----------+-----------+------------+
+|          | log(AAPL) | log(MSFT) | log(AMZN) | log(NVDA) | log(BRK-B) |
++==========+===========+===========+===========+===========+============+
+| Q(13)    | 11.187    | 33.273    | 9.866     | 11.550    | 68.451     |
++----------+-----------+-----------+-----------+-----------+------------+
+| p-value  | 0.595     | 0.002     | 0.705     | 0.565     | 0.000      |
++----------+-----------+-----------+-----------+-----------+------------+
+| ARCH(13) | 26.612    | 56.143    | 42.067    | 52.998    | 223.245    |
++----------+-----------+-----------+-----------+-----------+------------+
+| p-value  | 0.014     | 0.000     | 0.000     | 0.000     | 0.000      |
++----------+-----------+-----------+-----------+-----------+------------+
+| JB       | 384.641   | 491.773   | 462.897   | 1429.477  | 2626.419   |
++----------+-----------+-----------+-----------+-----------+------------+
+| p-value  | 0.000     | 0.000     | 0.000     | 0.000     | 0.000      |
++----------+-----------+-----------+-----------+-----------+------------+
+
+: Residual diagnostics of random walk with drift model
+
+The Ljung-Box test on the residuals of the random walk with drift models of MSFT and BRK-B produce p-values that are smaller than 0.05, which means the null hypothesis of no serial autocorrelation in residuals is rejected at the 5% level. The random walk with drift might not appropriately account for the dependence in these two stocks. There is no evidence of residual autocorrelation in the models for AAPL, AMZN, and NVDA. The ARCH-LM test and Jarque-Bera test both yield p-values of less than 0.05 for all five series, which provides evidence that the residuals are heteroskedastic and non-normal. As previously mentioned, such time varying volatility can be modeled using GARCH(1,1) but is outside the scope of this report.
+
+### 4) Forecasting using random walk with drift
+
+The 4-periods-ahead forecasts of the random walk with drift model is presented in Table 6, with forecast errors in brackets. The random walk with drift also forecasts an increase in stock prices over the next month, and the forecast errors also increase over the forecasting horizon. The point forecasts are similar to the AR models but the forecast errors are higher.
+
+```{r forecasting using random walk with drift}
+#| echo: false
+#| message: false
+#| results: hide
+
+# forecast
+h           = 4
+# AAPL
+AAPL.rw.f   = rep(AAPL[T], h) + (1:h)*AAPL.rw.mu0
+AAPL.rw.se  = sqrt((1:4)*AAPL.rw.sigma2)
+AAPL.rw.fci = rbind(AAPL.rw.f + qnorm(.975)*AAPL.rw.se, 
+                    AAPL.rw.f + qnorm(.025)*AAPL.rw.se)
+
+# MSFT
+MSFT.rw.f   = rep(MSFT[T], h) + (1:h)*MSFT.rw.mu0
+MSFT.rw.se  = sqrt((1:4)*MSFT.rw.sigma2)
+MSFT.rw.fci = rbind(MSFT.rw.f + qnorm(.975)*MSFT.rw.se, 
+                    MSFT.rw.f + qnorm(.025)*MSFT.rw.se)
+
+# AMZN
+AMZN.rw.f   = rep(AMZN[T], h) + (1:h)*AMZN.rw.mu0
+AMZN.rw.se  = sqrt((1:4)*AMZN.rw.sigma2)
+AMZN.rw.fci = rbind(AMZN.rw.f + qnorm(.975)*AMZN.rw.se, 
+                    AMZN.rw.f + qnorm(.025)*AMZN.rw.se)
+
+# NVDA
+NVDA.rw.f   = rep(NVDA[T], h) + (1:h)*NVDA.rw.mu0
+NVDA.rw.se  = sqrt((1:4)*NVDA.rw.sigma2)
+NVDA.rw.fci = rbind(NVDA.rw.f + qnorm(.975)*NVDA.rw.se, 
+                    NVDA.rw.f + qnorm(.025)*NVDA.rw.se)
+
+#BRK
+BRK.rw.f   = rep(BRK[T], h) + (1:h)*BRK.rw.mu0
+BRK.rw.se  = sqrt((1:4)*BRK.rw.sigma2)
+BRK.rw.fci = rbind(BRK.rw.f + qnorm(.975)*BRK.rw.se, 
+                    BRK.rw.f + qnorm(.025)*BRK.rw.se)
+
+# results
+AAPL.rw.fci
+MSFT.rw.fci
+AMZN.rw.fci
+NVDA.rw.fci
+BRK.rw.fci
+
+round(matrix(c(
+               AAPL.rw.f[1], MSFT.rw.f[1], AMZN.rw.f[1], NVDA.rw.f[1], BRK.rw.f[1], 
+               AAPL.rw.se[1], MSFT.rw.se[1], AMZN.rw.se[1], NVDA.rw.se[1], BRK.rw.se[1],
+               AAPL.rw.f[2], MSFT.rw.f[2], AMZN.rw.f[2], NVDA.rw.f[2], BRK.rw.f[2], 
+               AAPL.rw.se[2], MSFT.rw.se[2], AMZN.rw.se[2], NVDA.rw.se[2], BRK.rw.se[2],
+               AAPL.rw.f[3], MSFT.rw.f[3], AMZN.rw.f[3], NVDA.rw.f[3], BRK.rw.f[3], 
+               AAPL.rw.se[3], MSFT.rw.se[3], AMZN.rw.se[3], NVDA.rw.se[3], BRK.rw.se[3],
+               AAPL.rw.f[4], MSFT.rw.f[4], AMZN.rw.f[4], NVDA.rw.f[4], BRK.rw.f[4], 
+               AAPL.rw.se[4], MSFT.rw.se[4], AMZN.rw.se[4], NVDA.rw.se[4], BRK.rw.se[4]
+              ),
+             ncol = 5, byrow = TRUE), 4)
+```
+
++-----------+-----------+-----------+-----------+-----------+------------+
+|           | log(AAPL) | log(MSFT) | log(AMZN) | log(NVDA) | log(BRK-B) |
++===========+===========+===========+===========+===========+============+
+| 3/4/2023  | 5.0705    | 5.6246    | 4.5891    | 5.5859    | 5.7125     |
+|           |           |           |           |           |            |
+| (h=1)     | (0.0460)  | (0.0345)  | (0.0506)  | (0.0674)  | (0.0296)   |
++-----------+-----------+-----------+-----------+-----------+------------+
+| 10/4/2023 | 5.0766    | 5.6274    | 4.5929    | 5.5910    | 5.7141     |
+|           |           |           |           |           |            |
+| (h=2)     | (0.0650)  | (0.0488)  | (0.0715)  | (0.0953)  | (0.0418)   |
++-----------+-----------+-----------+-----------+-----------+------------+
+| 17/4/2023 | 5.0828    | 5.6301    | 4.5966    | 5.5960    | 5.7157     |
+|           |           |           |           |           |            |
+| (h=3)     | (0.0797)  | (0.0598)  | (0.0876)  | (0.1167)  | (0.0512)   |
++-----------+-----------+-----------+-----------+-----------+------------+
+| 24/4/2023 | 5.0889    | 5.6329    | 4.6004    | 5.6010    | 5.7174     |
+|           |           |           |           |           |            |
+| (h=4)     | (0.0920)  | (0.0691)  | (0.1012)  | (0.1347)  | (0.0591)   |
++-----------+-----------+-----------+-----------+-----------+------------+
+
+: 4-periods-ahead point forecast and forecast error of random walk with drift model
+
+### 5) Establishing the relationship between NASDAQ composite and each stock
+
+Using the NASDAQ as an explanatory variable to forecast stock prices was explored as the selected stocks are closely related to the technology sector. An AR(1) structure was selected by AIC and this will be used to forecast the future values of the NASDAQ index. Linear regression models are then created by regressing the logarithm of each company's stock prices on the logarithm of the NASDAQ index. The linear regressions are presented below:
+
+```{=tex}
+\vspace{-20pt}
+\begin{align}
+log(AAPL_t) &= -15.312 + 2.158*log(NASDAQ_t) + u_t, \bar{R^2} = 0.8509\\
+log(MSFT_t) &= -8.197 + 1.437*log(NASDAQ_t) + u_t, \bar{R^2} = 0.9633\\
+log(AMZN_t) &= -15.688 + 2.216*log(NASDAQ_t) + u_t, \bar{R^2} = 0.9209\\
+log(NVDA_t) &= -16.777 + 2.293*log(NASDAQ_t) + u_t, \bar{R^2} = 0.8984\\
+log(BRK-B_t) &= -2.001 + 0.812*1og(NASDAQ_t) + u_t, \bar{R^2}=0.9554
+\end{align}
+```
+Using heteroskedasticity and autocorrelation consistent (HAC) standard errors, all coefficients are statistically significant at the 1% level. The high adjusted $R^2$ (at least 85%) also suggests that the NASDAQ index explains a large proportion of variation in the selected stocks. The residual diagnostics for each linear regression and the AR(1) model for NASDAQ is presented in Table 7:
+
+```{r NASDAQ residual diagnostics}
+#| echo: false
+#| message: false
+#| results: hide
+
+# download NASDAQ data
+NASDAQ_yahoo = "https://query1.finance.yahoo.com/v7/finance/download/%5EIXIC?period1=1075680000&period2=1679961600&interval=1wk&events=history&includeAdjustedClose=true"
+NASDAQ_download = read.csv(NASDAQ_yahoo)
+NASDAQ = xts::xts(log(NASDAQ_download[,6]), as.Date(NASDAQ_download[,1])) 
+dates_NASDAQ = zoo::index(NASDAQ)
+
+# Create an AR model for NASDAQ to forecast its future values                          
+NASDAQ.ar= ar(NASDAQ, order.max = 30, aic = TRUE, method = "ols")
+# Optimal lag order of 1 for NASDAQ
+NASDAQ.ar= ar(NASDAQ, order.max = 1, aic = FALSE, method = "ols")
+# Residuals diagnostics
+NASDAQ.lb = AutocorTest(NASDAQ.ar$resid, lag = 13, type = "Ljung-Box")
+NASDAQ.arch = ArchTest(NASDAQ.ar$resid, lags = 13)
+NASDAQ.jb = jarque.bera.test(na.omit(NASDAQ.ar$resid))
+
+# forecast
+NASDAQ.ar.f = predict(NASDAQ.ar, n.ahead=4, se.fit=TRUE)
+NASDAQ.ar.fci = rbind(NASDAQ.ar.f$pred + qnorm(.975)*NASDAQ.ar.f$se, 
+                    NASDAQ.ar.f$pred + qnorm(.025)*NASDAQ.ar.f$se)
+
+# Linear regression of stocks on NASDAQ
+NASDAQ.AAPL = lm(AAPL ~ NASDAQ)
+NASDAQ.AAPL.fit = NASDAQ.AAPL$fitted.values
+
+NASDAQ.MSFT = lm(MSFT ~ NASDAQ)
+NASDAQ.MSFT.fit = NASDAQ.MSFT$fitted.values
+
+NASDAQ.AMZN = lm(AMZN ~ NASDAQ)
+NASDAQ.AMZN.fit = NASDAQ.AMZN$fitted.values
+
+NASDAQ.NVDA = lm(NVDA ~ NASDAQ)
+NASDAQ.NVDA.fit = NASDAQ.NVDA$fitted.values
+
+NASDAQ.BRK = lm(BRK ~ NASDAQ)
+NASDAQ.BRK.fit = NASDAQ.BRK$fitted.values
+
+sigma.NASAAPL = sum(NASDAQ.AAPL$residuals^2)/NASDAQ.AAPL$df.residual
+sigma.NASMSFT = sum(NASDAQ.MSFT$residuals^2)/NASDAQ.MSFT$df.residual
+sigma.NASAMZN = sum(NASDAQ.AMZN$residuals^2)/NASDAQ.AMZN$df.residual
+sigma.NASNVDA = sum(NASDAQ.NVDA$residuals^2)/NASDAQ.NVDA$df.residual
+sigma.NASBRK = sum(NASDAQ.BRK$residuals^2)/NASDAQ.BRK$df.residual
+
+# Ljung Box test
+NASAAPL.lb = AutocorTest(NASDAQ.AAPL$resid, lag = 13, type="Ljung-Box")
+NASMSFT.lb = AutocorTest(NASDAQ.MSFT$residuals, lag = 13, type="Ljung-Box")
+NASAMZN.lb = AutocorTest(NASDAQ.AMZN$residuals, lag = 13, type="Ljung-Box")
+NASNVDA.lb = AutocorTest(NASDAQ.NVDA$residuals, lag = 13, type="Ljung-Box")
+NASBRK.lb = AutocorTest(NASDAQ.BRK$residuals, lag = 13, type="Ljung-Box")
+
+# ARCH LM test
+NASAAPL.arch = ArchTest(NASDAQ.AAPL$resid, lags=13)
+NASMSFT.arch = ArchTest(NASDAQ.MSFT$resid, lags=13)
+NASAMZN.arch = ArchTest(NASDAQ.AMZN$resid, lags=13)
+NASNVDA.arch = ArchTest(NASDAQ.NVDA$resid, lags=13)
+NASBRK.arch = ArchTest(NASDAQ.BRK$resid, lags=13)
+
+# jarque bera test 
+NASAAPL.jb = jarque.bera.test(na.omit(NASDAQ.AAPL$resid))
+NASMSFT.jb = jarque.bera.test(na.omit(NASDAQ.MSFT$resid))
+NASAMZN.jb = jarque.bera.test(na.omit(NASDAQ.AMZN$resid))
+NASNVDA.jb = jarque.bera.test(na.omit(NASDAQ.NVDA$resid))
+NASBRK.jb = jarque.bera.test(na.omit(NASDAQ.BRK$resid))
+
+# statistical significane
+coeftest(NASDAQ.AAPL, vcov=vcovHAC(NASDAQ.AAPL))
+coeftest(NASDAQ.MSFT, vcov=vcovHAC(NASDAQ.MSFT))
+coeftest(NASDAQ.AMZN, vcov=vcovHAC(NASDAQ.AMZN))
+coeftest(NASDAQ.NVDA, vcov=vcovHAC(NASDAQ.NVDA))
+coeftest(NASDAQ.BRK, vcov=vcovHAC(NASDAQ.BRK))
+
+# output residual diagnostics in a table
+round(matrix(c(
+               NASAAPL.lb$statistic, NASMSFT.lb$statistic, NASAMZN.lb$statistic, NASNVDA.lb$statistic, NASBRK.lb$statistic, NASDAQ.lb$statistic,
+               NASAAPL.lb$p.value, NASMSFT.lb$p.value, NASAMZN.lb$p.value, NASNVDA.lb$p.value, NASBRK.lb$p.value, NASDAQ.lb$p.value, 
+               NASAAPL.arch$statistic, NASMSFT.arch$statistic, NASAMZN.arch$statistic, NASNVDA.arch$statistic, NASBRK.arch$statistic, NASDAQ.arch$statistic,
+               NASAAPL.arch$p.value, NASMSFT.arch$p.value, NASAMZN.arch$p.value, NASNVDA.arch$p.value, NASBRK.arch$p.value, NASDAQ.arch$p.value,
+               NASAAPL.jb$statistic, NASMSFT.jb$statistic, NASAMZN.jb$statistic, NASNVDA.jb$statistic, NASBRK.jb$statistic, NASDAQ.jb$statistic,
+               NASAAPL.jb$p.value, NASMSFT.jb$p.value, NASAMZN.jb$p.value, NASNVDA.jb$p.value, NASBRK.jb$p.value, NASDAQ.jb$p.value
+               ),
+             ncol = 6, byrow = TRUE), 3)
+
+```
+
++----------+--------------------------+--------------------------+--------------------------+--------------------------+---------------------------+-------------+
+|          | log(AAPL) \~ log(NASDAQ) | log(MSFT) \~ log(NASDAQ) | log(AMZN) \~ log(NASDAQ) | log(NVDA) \~ log(NASDAQ) | log(BRK-B) \~ log(NASDAQ) | log(NASDAQ) |
++==========+==========================+==========================+==========================+==========================+===========================+=============+
+| Q(13)    | 11544.322                | 11076.270                | 11785.541                | 11825.929                | 9429.057                  | 9.812       |
++----------+--------------------------+--------------------------+--------------------------+--------------------------+---------------------------+-------------+
+| p-value  | 0.000                    | 0.000                    | 0.000                    | 0.000                    | 0.000                     | 0.709       |
++----------+--------------------------+--------------------------+--------------------------+--------------------------+---------------------------+-------------+
+| ARCH(13) | 977.198                  | 889.469                  | 937.102                  | 963.030                  | 845.626                   | 217.292     |
++----------+--------------------------+--------------------------+--------------------------+--------------------------+---------------------------+-------------+
+| p-value  | 0.000                    | 0.000                    | 0.000                    | 0.000                    | 0.000                     | 0.000       |
++----------+--------------------------+--------------------------+--------------------------+--------------------------+---------------------------+-------------+
+| JB       | 326.286                  | 21.829                   | 66.887                   | 76.661                   | 10.756                    | 515.775     |
++----------+--------------------------+--------------------------+--------------------------+--------------------------+---------------------------+-------------+
+| p-value  | 0.000                    | 0.000                    | 0.000                    | 0.000                    | 0.005                     | 0.000       |
++----------+--------------------------+--------------------------+--------------------------+--------------------------+---------------------------+-------------+
+
+: Residual diagnostics of the 5 linear regressions between each stock and NASDAQ, and the AR model for NASDAQ
+
+The results show that all five linear regressions of the selected stocks on NASDAQ exhibit autocorrelation, heteroskedasticity, and non-normality in residuals. Autocorrelation is not an issue here as these are linear regressions, not autoregressive models, so autocorrelation will not bias the coefficient estimates. The AR(1) model for NASDAQ has no autocorrelation in residuals, which means the AR(1) model adequately accounts for the dependence in the NASDAQ index. However, the residuals of the AR(1) model exhibit heteroskedasticity and non-normality.
+
+### 6) Forecasting using NASDAQ composite
+
+Next, the forecasts of the five stocks are generated using predicted values from the AR(1) model of NASDAQ and coefficients from the linear regression models. The 4-periods-ahead forecast for the five stocks and NASDAQ are presented in Table 8:
+
+```{r forecasting using NASDAQ}
+#| echo: false
+#| message: false
+#| results: hide
+
+NASDAQ.AAPL.f  = as.vector(NASDAQ.AAPL$coefficients[1] + NASDAQ.AAPL$coefficients[2]*NASDAQ.ar.f$pred)
+NASDAQ.MSFT.f  = as.vector(NASDAQ.MSFT$coefficients[1] + NASDAQ.MSFT$coefficients[2]*NASDAQ.ar.f$pred)
+NASDAQ.AMZN.f  = as.vector(NASDAQ.AMZN$coefficients[1] + NASDAQ.AMZN$coefficients[2]*NASDAQ.ar.f$pred)
+NASDAQ.NVDA.f  = as.vector(NASDAQ.NVDA$coefficients[1] + NASDAQ.NVDA$coefficients[2]*NASDAQ.ar.f$pred)
+NASDAQ.BRK.f  = as.vector(NASDAQ.BRK$coefficients[1] + NASDAQ.BRK$coefficients[2]*NASDAQ.ar.f$pred)
+
+NASDAQ.AAPL.f.se= sqrt(sigma.NASAAPL + (NASDAQ.AAPL$coefficients[2]^2)*(NASDAQ.ar.f$se^2))
+NASDAQ.AAPL.fci = rbind(NASDAQ.AAPL.f + qnorm(.975)*NASDAQ.AAPL.f.se, 
+                    NASDAQ.AAPL.f + qnorm(.025)*NASDAQ.AAPL.f.se)
+
+NASDAQ.MSFT.f.se= sqrt(sigma.NASMSFT + (NASDAQ.MSFT$coefficients[2]^2)*(NASDAQ.ar.f$se^2))
+NASDAQ.MSFT.fci = rbind(NASDAQ.MSFT.f + qnorm(.975)*NASDAQ.MSFT.f.se, 
+                    NASDAQ.MSFT.f + qnorm(.025)*NASDAQ.MSFT.f.se)
+
+NASDAQ.AMZN.f.se= sqrt(sigma.NASAMZN + (NASDAQ.AMZN$coefficients[2]^2)*(NASDAQ.ar.f$se^2))
+NASDAQ.AMZN.fci = rbind(NASDAQ.AMZN.f + qnorm(.975)*NASDAQ.AMZN.f.se, 
+                    NASDAQ.AMZN.f + qnorm(.025)*NASDAQ.AMZN.f.se)
+
+NASDAQ.NVDA.f.se= sqrt(sigma.NASNVDA + (NASDAQ.NVDA$coefficients[2]^2)*(NASDAQ.ar.f$se^2))
+NASDAQ.NVDA.fci = rbind(NASDAQ.NVDA.f + qnorm(.975)*NASDAQ.NVDA.f.se, 
+                    NASDAQ.NVDA.f + qnorm(.025)*NASDAQ.NVDA.f.se)
+
+NASDAQ.BRK.f.se= sqrt(sigma.NASBRK + (NASDAQ.BRK$coefficients[2]^2)*(NASDAQ.ar.f$se^2))
+NASDAQ.BRK.fci = rbind(NASDAQ.BRK.f + qnorm(.975)*NASDAQ.BRK.f.se, 
+                    NASDAQ.BRK.f + qnorm(.025)*NASDAQ.BRK.f.se)
+
+# results
+NASDAQ.AAPL.fci
+NASDAQ.MSFT.fci
+NASDAQ.AMZN.fci
+NASDAQ.NVDA.fci
+NASDAQ.BRK.fci
+NASDAQ.ar.fci
+
+round(matrix(c(
+               NASDAQ.AAPL.f[1], NASDAQ.MSFT.f[1], NASDAQ.AMZN.f[1], NASDAQ.NVDA.f[1], NASDAQ.BRK.f[1], NASDAQ.ar.f$pred[1],
+               NASDAQ.AAPL.f.se[1], NASDAQ.MSFT.f.se[1], NASDAQ.AMZN.f.se[1], NASDAQ.NVDA.f.se[1], NASDAQ.BRK.f.se[1], NASDAQ.ar.f$se[1], 
+               NASDAQ.AAPL.f[2], NASDAQ.MSFT.f[2], NASDAQ.AMZN.f[2], NASDAQ.NVDA.f[2], NASDAQ.BRK.f[2], NASDAQ.ar.f$pred[2],
+               NASDAQ.AAPL.f.se[2], NASDAQ.MSFT.f.se[2], NASDAQ.AMZN.f.se[2], NASDAQ.NVDA.f.se[2], NASDAQ.BRK.f.se[2], NASDAQ.ar.f$se[2],
+               NASDAQ.AAPL.f[3], NASDAQ.MSFT.f[3], NASDAQ.AMZN.f[3], NASDAQ.NVDA.f[3], NASDAQ.BRK.f[3], NASDAQ.ar.f$pred[3],
+               NASDAQ.AAPL.f.se[3], NASDAQ.MSFT.f.se[3], NASDAQ.AMZN.f.se[3], NASDAQ.NVDA.f.se[3], NASDAQ.BRK.f.se[3], NASDAQ.ar.f$se[3],
+               NASDAQ.AAPL.f[4], NASDAQ.MSFT.f[4], NASDAQ.AMZN.f[4], NASDAQ.NVDA.f[4], NASDAQ.BRK.f[4], NASDAQ.ar.f$pred[4],
+               NASDAQ.AAPL.f.se[4], NASDAQ.MSFT.f.se[4], NASDAQ.AMZN.f.se[4], NASDAQ.NVDA.f.se[4], NASDAQ.BRK.f.se[4], NASDAQ.ar.f$se[4]
+              ),
+             ncol = 6, byrow = TRUE), 4)
+```
+
++-----------+-----------+-----------+-----------+-----------+------------+-------------+
+|           | log(AAPL) | log(MSFT) | log(AMZN) | log(NVDA) | log(BRK-B) | log(NASDAQ) |
++===========+===========+===========+===========+===========+============+=============+
+| 3/4/2023  | 4.9174    | 5.2778    | 5.0874    | 4.7168    | 5.6073     | 9.3747      |
+|           |           |           |           |           |            |             |
+| (h=1)     | (0.5941)  | (0.1878)  | (0.4296)  | (0.5085)  | (0.1169)   | (0.0276)    |
++-----------+-----------+-----------+-----------+-----------+------------+-------------+
+| 10/4/2023 | 4.9207    | 5.2800    | 5.0908    | 4.7203    | 5.6085     | 9.3763      |
+|           |           |           |           |           |            |             |
+| (h=2)     | (0.5971)  | (0.1919)  | (0.4339)  | (0.5125)  | (0.1190)   | (0.0390)    |
++-----------+-----------+-----------+-----------+-----------+------------+-------------+
+| 17/4/2023 | 4.9240    | 5.2822    | 5.0942    | 4.7239    | 5.6098     | 9.3778      |
+|           |           |           |           |           |            |             |
+| (h=3)     | (0.6000)  | (0.1960)  | (0.4382)  | (0.5163)  | (0.1211)   | (0.0477)    |
++-----------+-----------+-----------+-----------+-----------+------------+-------------+
+| 24/4/2023 | 4.9273    | 5.2844    | 5.0976    | 4.7274    | 5.6110     | 9.3793      |
+|           |           |           |           |           |            |             |
+| (h=4)     | (0.6030)  | (0.1999)  | (0.4424)  | (0.5202)  | (0.1231)   | (0.0551)    |
++-----------+-----------+-----------+-----------+-----------+------------+-------------+
+
+: 4-periods-ahead point forecast and forecast error of linear regressions and NASDAQ's AR(1)
+
+The linear regressions predict that Apple's, Microsoft's, Nvidia's, and Berskire Hathaway's stock prices will decrease, but it predicts that Amazon's stock price will increase in the next period. In the 3 subsequent weeks, all stock prices are forecast to increase relative to the first week's forecast. The forecast errors increase with the forecasting horizon as before, but they are higher than the AR model forecasts. The latter suggests that the linear regression forecasts are less precise than the AR model forecasts. The corresponding 95% forecast intervals are presented in Table 9:
+
++-----------+--------------------+--------------------+--------------------+--------------------+--------------------+--------------------+
+|           | log(AAPL)          | log(MSFT)          | log(AMZN)          | log(NVDA)          | log(BRK-B)         | log(NASDAQ)        |
++===========+====================+====================+====================+====================+====================+====================+
+| 3/4/2023  | \[3.7529, 6.0819\] | \[4.9098, 5.6459\] | \[4.2454, 5.9294\] | \[3.7201, 5.7136\] | \[5.3782, 5.8364\] | \[9.3207, 9.4288\] |
+|           |                    |                    |                    |                    |                    |                    |
+| (h=1)     |                    |                    |                    |                    |                    |                    |
++-----------+--------------------+--------------------+--------------------+--------------------+--------------------+--------------------+
+| 10/4/2023 | \[3.7504, 6.0910\] | \[4.9039, 5.6562\] | \[4.2404, 5.9413\] | \[3.7159, 5.7247\] | \[5.3753, 5.8418\] | \[9.2999, 9.4527\] |
+|           |                    |                    |                    |                    |                    |                    |
+| (h=2)     |                    |                    |                    |                    |                    |                    |
++-----------+--------------------+--------------------+--------------------+--------------------+--------------------+--------------------+
+| 17/4/2023 | \[3.7479, 6.1001\] | \[4.8981, 5.6663\] | \[4.2354, 5.9531\] | \[3.7119, 5.7359\] | \[5.3725, 5.8471\] | \[9.2842, 9.4714\] |
+|           |                    |                    |                    |                    |                    |                    |
+| (h=3)     |                    |                    |                    |                    |                    |                    |
++-----------+--------------------+--------------------+--------------------+--------------------+--------------------+--------------------+
+| 24/4/2023 | \[3.7455, 6.1092\] | \[4.8926, 5.6763\] | \[4.2305, 5.9648\] | \[3.7078, 5.7469\] | \[5.3697, 5.8524\] | \[9.2713, 9.4874\] |
+|           |                    |                    |                    |                    |                    |                    |
+| (h=4)     |                    |                    |                    |                    |                    |                    |
++-----------+--------------------+--------------------+--------------------+--------------------+--------------------+--------------------+
+
+: 4-periods-ahead forecast interval of the stocks and NASDAQ index
+
+These intervals have a 95% chance of containing the future values of the stocks. They are becoming wider with the forecasting horizon due to increasing forecast errors.
+
+## Combining forecasts
+
+The forecasts of the AR models and the linear regressions will be combined. This is because the AR models have small forecast errors, while the adjusted $R^2$ of the linear regressions is at least 85%, which suggests that the NASDAQ index captures a large proportion of the variation in stock prices. The random walk with drift model will not be used as the forecasts produced are similar to those produced by AR but have larger forecast errors. Each stock is regressed on the fitted values of its AR model and linear regression. The fitted regression yields the following estimates ($^{(AR)}$ is fitted values of AR model and $^{(NASDAQ)}$ is fitted values from linear regressions on NASDAQ):
+
+```{=tex}
+\vspace{-20pt}
+\begin{align}
+log(AAPL)_t &= 0.9912*log\widehat{AAPL_t}^{(AR)} + 0.0091*log\widehat{AAPL_t}^{(NASDAQ)} + \hat{v_t}\\
+\
+log(MSFT)_t &= 0.9622*log\widehat{MSFT_t}^{(AR)} + 0.0378*log\widehat{MSFT_t}^{(NASDAQ)} + \hat{v_t}\\ 
+log(AMZN)_t &= 0.9930*log\widehat{AMZN_t}^{(AR)} + 0.0071*log\widehat{AMZN_t}^{(NASDAQ)} + \hat{v_t}\\
+log(NVDA)_t &= 0.9861*log\widehat{NVDA_t}^{(AR)} + 0.0144*log\widehat{NVDA_t}^{(NASDAQ)} + \hat{v_t}\\
+log(BRK-B)_t &= 0.9462*log\widehat{BRK-B_t}^{(AR)} + 0.0538*log\widehat{BRK-B_t}^{(NASDAQ)} + \hat{v_t}
+\end{align}
+```
+If the sum of the coefficient estimates are not equal to 1, the optimal weights of each forecast is the coefficient estimate on the respective fitted values divided by the sum of coefficient estimates. The weights are the respective coefficient estimates if they sum to 1. Weights are adjusted for AAPL, AMZN, and NVDA. For AAPL, the adjusted weights are 0.9909 in the AR forecast and 0.0091 in the linear regression forecast. For AMZN, the adjusted weights are 0.9929 in the AR forecast and 0.0071 in the linear regression forecast. For NVDA, the adjusted weights are 0.9856 in the AR forecast and 0.0144 in the linear regression forecast. Most of the weights are put in the AR forecasts, which is not surprising given the relatively high forecast errors of the forecasts produce by linear regressions. The 4-periods-ahead combined forecasts and forecast errors are shown in Table 10:
+
+```{r combining forecasts}
+#| echo: false
+#| message: false
+#| results: hide
+# AAPL
+# -1 so that there is no intercept
+omega.AAPL = lm(AAPL ~ AAPL.ar.fit + NASDAQ.AAPL.fit - 1)
+omega_AAPL = omega.AAPL$coefficients/sum(omega.AAPL$coefficients)
+
+AAPL.cf.fit = omega_AAPL[1]*AAPL.ar.fit + omega_AAPL[2]*NASDAQ.AAPL.fit
+AAPL.cf   = omega_AAPL[1]*AAPL.ar.f$pred + omega_AAPL[2]*NASDAQ.AAPL.f
+AAPL.cf.se= sqrt((omega_AAPL[1]^2)*(AAPL.ar.f$se^2) + (omega_AAPL[2]^2)*(NASDAQ.AAPL.f.se^2))
+AAPL.cf.ci= rbind(AAPL.cf + qnorm(0.975)*AAPL.cf.se,
+                  AAPL.cf + qnorm(0.025)*AAPL.cf.se)
+
+AAPL.ar.f$se
+NASDAQ.AAPL.f.se
+AAPL.cf.se # the smallest forecast error variances (std errors)
+# Doesn't do much to use random walk with drift, basically just uses AR.
+
+# MSFT
+# -1 so that there is no intercept
+omega.MSFT = lm(MSFT ~ MSFT.ar.fit + NASDAQ.MSFT.fit - 1)
+omega_MSFT = omega.MSFT$coefficients/sum(omega.MSFT$coefficients)
+
+MSFT.cf.fit = omega_MSFT[1]*MSFT.ar.fit + omega_MSFT[2]*NASDAQ.MSFT.fit
+MSFT.cf   = omega_MSFT[1]*MSFT.ar.f$pred + omega_MSFT[2]*NASDAQ.MSFT.f
+MSFT.cf.se= sqrt((omega_MSFT[1]^2)*(MSFT.ar.f$se^2) + (omega_MSFT[2]^2)*(NASDAQ.MSFT.f.se^2))
+MSFT.cf.ci= rbind(MSFT.cf + qnorm(0.975)*MSFT.cf.se,
+                  MSFT.cf + qnorm(0.025)*MSFT.cf.se)
+
+MSFT.ar.f$se
+NASDAQ.MSFT.f.se
+MSFT.cf.se
+
+# AMZN
+# -1 so that there is no intercept
+omega.AMZN = lm(AMZN ~ AMZN.ar.fit + NASDAQ.AMZN.fit - 1)
+omega_AMZN = omega.AMZN$coefficients/sum(omega.AMZN$coefficients)
+
+AMZN.cf.fit = omega_AMZN[1]*AMZN.ar.fit + omega_AMZN[2]*NASDAQ.AMZN.fit
+AMZN.cf   = omega_AMZN[1]*AMZN.ar.f$pred + omega_AMZN[2]*NASDAQ.AMZN.f
+AMZN.cf.se= sqrt((omega_AMZN[1]^2)*(AMZN.ar.f$se^2) + (omega_AMZN[2]^2)*(NASDAQ.AMZN.f.se^2))
+AMZN.cf.ci= rbind(AMZN.cf + qnorm(0.975)*AMZN.cf.se,
+                  AMZN.cf + qnorm(0.025)*AMZN.cf.se)
+
+AMZN.ar.f$se
+NASDAQ.AMZN.f.se
+AMZN.cf.se
+
+# NVDA
+# -1 so that there is no intercept
+omega.NVDA = lm(NVDA ~ NVDA.ar.fit + NASDAQ.NVDA.fit - 1)
+omega_NVDA = omega.NVDA$coefficients/sum(omega.NVDA$coefficients)
+
+NVDA.cf.fit = omega_NVDA[1]*NVDA.ar.fit + omega_NVDA[2]*NASDAQ.NVDA.fit
+NVDA.cf   = omega_NVDA[1]*NVDA.ar.f$pred + omega_NVDA[2]*NASDAQ.NVDA.f
+NVDA.cf.se= sqrt((omega_NVDA[1]^2)*(NVDA.ar.f$se^2) + (omega_NVDA[2]^2)*(NASDAQ.NVDA.f.se^2))
+NVDA.cf.ci= rbind(NVDA.cf + qnorm(0.975)*NVDA.cf.se,
+                  NVDA.cf + qnorm(0.025)*NVDA.cf.se)
+
+NVDA.ar.f$se
+NASDAQ.NVDA.f.se
+NVDA.cf.se
+
+# BRK
+# -1 so that there is no intercept
+omega.BRK = lm(BRK ~ BRK.ar.fit + NASDAQ.BRK.fit - 1)
+omega_BRK = omega.BRK$coefficients/sum(omega.BRK$coefficients)
+
+BRK.cf.fit = omega_BRK[1]*BRK.ar.fit + omega_BRK[2]*NASDAQ.BRK.fit
+BRK.cf   = omega_BRK[1]*BRK.ar.f$pred + omega_BRK[2]*NASDAQ.BRK.f
+BRK.cf.se= sqrt((omega_BRK[1]^2)*(BRK.ar.f$se^2) + (omega_BRK[2]^2)*(NASDAQ.BRK.f.se^2))
+BRK.cf.ci= rbind(BRK.cf + qnorm(0.975)*BRK.cf.se,
+                 BRK.cf + qnorm(0.025)*BRK.cf.se)
+
+BRK.ar.f$se
+NASDAQ.BRK.f.se
+BRK.cf.se
+
+# Results
+AAPL.cf.ci
+MSFT.cf.ci
+AMZN.cf.ci
+NVDA.cf.ci
+BRK.cf.ci
+
+round(matrix(c(
+               AAPL.cf[1], MSFT.cf[1], AMZN.cf[1], NVDA.cf[1], BRK.cf[1], 
+               AAPL.cf.se[1], MSFT.cf.se[1], AMZN.cf.se[1], NVDA.cf.se[1], BRK.cf.se[1], 
+               AAPL.cf[2], MSFT.cf[2], AMZN.cf[2], NVDA.cf[2], BRK.cf[2], 
+               AAPL.cf.se[2], MSFT.cf.se[2], AMZN.cf.se[2], NVDA.cf.se[2], BRK.cf.se[2], 
+               AAPL.cf[3], MSFT.cf[3], AMZN.cf[3], NVDA.cf[3], BRK.cf[3], 
+               AAPL.cf.se[3], MSFT.cf.se[3], AMZN.cf.se[3], NVDA.cf.se[3], BRK.cf.se[3], 
+               AAPL.cf[4], MSFT.cf[4], AMZN.cf[4], NVDA.cf[4], BRK.cf[4], 
+               AAPL.cf.se[4], MSFT.cf.se[4], AMZN.cf.se[4], NVDA.cf.se[4], BRK.cf.se[4]
+               ),
+             ncol = 5, byrow = TRUE), 4)
+
+```
+
++-----------+-----------+-----------+-----------+-----------+------------+
+|           | log(AAPL) | log(MSFT) | log(AMZN) | log(NVDA) | log(BRK-B) |
++:=========:+:=========:+:=========:+:=========:+:=========:+:==========:+
+| 3/4/2023  | 5.0639    | 5.6153    | 4.5915    | 5.5688    | 5.7119     |
+|           |           |           |           |           |            |
+| (h=1)     | (0.0454)  | (0.0336)  | (0.0502)  | (0.0633)  | (0.0278)   |
++-----------+-----------+-----------+-----------+-----------+------------+
+| 10/4/2023 | 5.0647    | 5.6193    | 4.5940    | 5.5895    | 5.7146     |
+|           |           |           |           |           |            |
+| (h=2)     | (0.0639)  | (0.0443)  | (0.0709)  | (0.0916)  | (0.0362)   |
++-----------+-----------+-----------+-----------+-----------+------------+
+| 17/4/2023 | 5.0656    | 5.6236    | 4.5966    | 5.6130    | 5.7156     |
+|           |           |           |           |           |            |
+| (h=3)     | (0.0781)  | (0.0531)  | (0.0868)  | (0.1128)  | (0.0436)   |
++-----------+-----------+-----------+-----------+-----------+------------+
+| 24/4/2023 | 5.0665    | 5.6279    | 4.5991    | 5.6225    | 5.7174     |
+|           |           |           |           |           |            |
+| (h=4)     | (0.0900)  | (0.0607)  | (0.1001)  | (0.1315)  | (0.0491)   |
++-----------+-----------+-----------+-----------+-----------+------------+
+
+: 4-periods-ahead point forecasts and forecast errors of combined forecasts
+
+The combined forecasts predict that AAPL's, MSFT's, and NVDA's stock price will decrease in the next period, while AMZN's and BRK-B's stock price is predicted to increase. All stock prices are forecast to increase in the 3 subsequent weeks, relative to the first week's forecast. As before, the forecast errors increase with the forecasting horizon. The corresponding 95% confidence intervals of the combined log-levels forecasts are shown in Table 11. These intervals have a 95% chance of containing the future values of the selected stocks.
+
++-----------+--------------------+--------------------+--------------------+--------------------+--------------------+
+|           | log(AAPL)          | log(MSFT)          | log(AMZN)          | log(NVDA)          | log(BRK-B)         |
++:=========:+:==================:+:==================:+:==================:+:==================:+:==================:+
+| 3/4/2023  | \[4.9749, 5.1528\] | \[5.5494, 5.6812\] | \[4.4931, 4.6899\] | \[5.4447, 5.6929\] | \[5.6573, 5.7664\] |
+|           |                    |                    |                    |                    |                    |
+| (h=1)     |                    |                    |                    |                    |                    |
++-----------+--------------------+--------------------+--------------------+--------------------+--------------------+
+| 10/4/2023 | \[4.9395, 5.1900\] | \[5.5325, 5.7061\] | \[4.4551, 4.7330\] | \[5.4099, 5.7690\] | \[5.6437, 5.7855\] |
+|           |                    |                    |                    |                    |                    |
+| (h=2)     |                    |                    |                    |                    |                    |
++-----------+--------------------+--------------------+--------------------+--------------------+--------------------+
+| 17/4/2023 | \[4.9126, 5.2186\] | \[5.5195, 5.7278\] | \[4.4265, 4.7666\] | \[5.3918, 5.8341\] | \[5.6301, 5.8011\] |
+|           |                    |                    |                    |                    |                    |
+| (h=3)     |                    |                    |                    |                    |                    |
++-----------+--------------------+--------------------+--------------------+--------------------+--------------------+
+| 24/4/2023 | \[4.8901, 5.2429\] | \[5.5090, 5.7469\] | \[4.4028, 4.7954\] | \[5.3646, 5.8803\] | \[5.6212, 5.8136\] |
+|           |                    |                    |                    |                    |                    |
+| (h=4)     |                    |                    |                    |                    |                    |
++-----------+--------------------+--------------------+--------------------+--------------------+--------------------+
+
+: 95% confidence intervals of the combined forecasts
+
+The forecast errors of the combined forecasts is lower than both the forecast errors of the AR forecasts and linear regression forecasts. Combining forecasts has increased the precision of the forecasts and narrowed forecast intervals. The combined forecasts are plotted in the graph below, with the forecast intervals represented by the arcs:
+
+```{r plotting forecasts}
+#| echo: false
+#| message: false
+#| fig-height: 5.25
+#| fig-width: 12
+# AAPL
+plot(x=dates.AAPL, y=c(as.vector(AAPL), rep(NA,h)), type="l", bty="n", col=qaf2, lwd=1, main="Logarithm of stock prices and forecasted values", xlab="date", ylab="natural logarithm of prices", ylim=range(AAPL,AAPL.cf.ci, MSFT, MSFT.cf.ci, AMZN, AMZN.cf.ci, NVDA, NVDA.cf.ci, BRK, BRK.cf.ci))
+
+polygon(x=c(dates_AAPL[1000],dates.AAPL.tmp,dates.AAPL.tmp[4:1],dates_AAPL[1000]), y=c(as.vector(AAPL[1000]),AAPL.cf.ci[1,],AAPL.cf.ci[2,4:1],as.vector(AAPL[1000])), col=qaf2.shade2, border=qaf2.shade2)
+
+lines(x=dates.AAPL, y=c(as.vector(AAPL.cf.fit), as.vector(AAPL.cf)), lwd=2, col=qaf2.shade1)
+
+# MSFT
+lines(x=dates.MSFT, y=c(as.vector(MSFT), rep(NA,h)), type="l", bty="n", col=qaf3, lwd=1, main="", xlab="", ylab="")
+
+polygon(x=c(dates_MSFT[1000],dates.MSFT.tmp,dates.MSFT.tmp[4:1],dates_MSFT[1000]), y=c(as.vector(MSFT[1000]),MSFT.cf.ci[1,],MSFT.cf.ci[2,4:1],as.vector(MSFT[1000])), col=qaf3.shade2, border=qaf3.shade2)
+
+lines(x=dates.MSFT, y=c(as.vector(MSFT.cf.fit), as.vector(MSFT.cf)), lwd=2, col=qaf3.shade1)
+
+# AMZN
+lines(x=dates.AMZN, y=c(as.vector(AMZN), rep(NA,h)), type="l", bty="n", col=qaf4, lwd=2, main="", xlab="", ylab="")
+
+polygon(x=c(dates_AMZN[1000],dates.AMZN.tmp,dates.AMZN.tmp[4:1],dates_AMZN[1000]), y=c(as.vector(AMZN[1000]),AMZN.cf.ci[1,],AMZN.cf.ci[2,4:1],as.vector(AMZN[1000])), col=qaf4.shade2, border=qaf4.shade2)
+
+lines(x=dates.AMZN, y=c(as.vector(AMZN.cf.fit), as.vector(AMZN.cf)), lwd=2, col=qaf4.shade1)
+
+# NVDA
+lines(x=dates.NVDA, y=c(as.vector(NVDA), rep(NA,h)), type="l", bty="n", col=qaf5, lwd=2, main="", xlab="", ylab="")
+
+polygon(x=c(dates_NVDA[1000],dates.NVDA.tmp,dates.NVDA.tmp[4:1],dates_NVDA[1000]), y=c(as.vector(NVDA[1000]),NVDA.cf.ci[1,],NVDA.cf.ci[2,4:1],as.vector(NVDA[1000])), col=qaf5.shade2, border=qaf5.shade2)
+
+lines(x=dates.NVDA, y=c(as.vector(NVDA.cf.fit), as.vector(NVDA.cf)), lwd=2, col=qaf5.shade1)
+
+# BRK
+lines(x=dates.BRK, y=c(as.vector(BRK), rep(NA,h)), type="l", bty="n", col=qaf6, lwd=2, main="", xlab="", ylab="")
+
+polygon(x=c(dates_BRK[1000],dates.BRK.tmp,dates.BRK.tmp[4:1],dates_BRK[1000]), y=c(as.vector(BRK[1000]),BRK.cf.ci[1,],BRK.cf.ci[2,4:1],as.vector(BRK[1000])), col=qaf6.shade2, border=qaf6.shade2)
+
+lines(x=dates.BRK, y=c(as.vector(BRK.cf.fit), as.vector(BRK.cf)), lwd=2, col=qaf6.shade1)
+
+# legend
+legend("bottomright", legend=c("AAPL","forecasted values of AAPL", "MSFT","forecasted values of MSFT", "AMZN","forecasted values of AMZN", "NVDA","forecasted values of NVDA", "BRK-B","forecasted values of BRK-B"), lwd=c(2,2,2,2,2,2,2,2,2,2), col=c(qaf2, qaf2.shade1, qaf3, qaf3.shade1, qaf4, qaf4.shade1, qaf5, qaf5.shade1, qaf6, qaf6.shade1), bty="n")
+
+```
+
+```{r converting combined forecasts to prices}
+#| echo: false
+#| message: false
+#| results: hide
+
+# AAPL
+eAAPL = omega_AAPL[1]*exp(AAPL.ar.f$pred) + omega_AAPL[2]*exp(NASDAQ.AAPL.f)
+# MSFT
+eMSFT = omega_MSFT[1]*exp(MSFT.ar.f$pred) + omega_MSFT[2]*exp(NASDAQ.MSFT.f)
+# AMZN
+eAMZN = omega_AMZN[1]*exp(AMZN.ar.f$pred) + omega_AMZN[2]*exp(NASDAQ.AMZN.f)
+# NVDA
+eNVDA = omega_NVDA[1]*exp(NVDA.ar.f$pred) + omega_NVDA[2]*exp(NASDAQ.NVDA.f)
+#BRK
+eBRK = omega_BRK[1]*exp(BRK.ar.f$pred) + omega_BRK[2]*exp(NASDAQ.BRK.f)
+
+# Summarise combined point forecasts and standard errors
+round(matrix(c(
+               eAAPL[1], eMSFT[1], eAMZN[1], eNVDA[1], eBRK[1], 
+               eAAPL[2], eMSFT[2], eAMZN[2], eNVDA[2], eBRK[2], 
+               eAAPL[3], eMSFT[3], eAMZN[3], eNVDA[3], eBRK[3], 
+               eAAPL[4], eMSFT[4], eAMZN[4], eNVDA[4], eBRK[4]
+               ),
+             ncol = 5, byrow = TRUE), 4)
+```
+
+Finally, the weighted average of the exponential of the AR and linear regression forecasts, based on the optimal weights calculated earlier, was computed. This conversion of the combined forecasts to their original scale facilitates interpretation as it represents the results as the forecast stock price at each of the specified dates. It can also facilitate comparisons with relevant financial metrics associated with the equities in question, thereby broadening the practical applicability of the forecasts. The results are summarised in Table 12:
+
+|           |   AAPL   |   MSFT   |  AMZN   |   NVDA   |  BRK-B   |
+|:---------:|:--------:|:--------:|:-------:|:--------:|:--------:|
+| 3/4/2023  | 158.2158 | 275.1515 | 98.7438 | 263.1950 | 302.5217 |
+| 10/4/2023 | 158.3526 | 276.2586 | 98.9956 | 268.7274 | 303.3514 |
+| 17/4/2023 | 158.4892 | 277.4639 | 99.2479 | 275.1590 | 303.6633 |
+| 24/4/2023 | 158.6256 | 278.6638 | 99.5006 | 277.7995 | 304.2068 |
+
+: Combined forecasts presented in terms of prices
+
+## Financial bubbles
+
+In this final section, the Generalised Supremum ADF (GSADF) test is performed on the selected stocks to detect the presence of price bubbles. The GSADF test performs the Supremum ADF test for each sub-sample beginning from the first observation in the first iteration, and moves forwards by one observation in subsequent iterations. The plots for the test are shown below, with the colored lines representing the test statistics of the respective stocks and the black line representing the simulated 95% critical values (CV). If the test statistic exceeds the 95% critical value, it suggests that the stock price is exhibiting bubble-like behaviour and may be overvalued relative to its fundamental value.
+
+```{r detecting financial bubbles, eval=FALSE, include=FALSE}
+# Set eval = TRUE for code to run 
+
+T           = length(AAPL)
+# AAPL
+# detrend the data
+X = cbind(rep(1,T), 1:T)
+AAPL_fb = AAPL - X %*% solve(crossprod(X), crossprod(X,AAPL))
+MSFT_fb = MSFT - X %*% solve(crossprod(X), crossprod(X,MSFT))
+AMZN_fb = AMZN - X %*% solve(crossprod(X), crossprod(X,AMZN))
+NVDA_fb = NVDA - X %*% solve(crossprod(X), crossprod(X,NVDA))
+BRK_fb = BRK - X %*% solve(crossprod(X), crossprod(X,BRK))
+
+# Right-tailed ADF test
+######################################################
+set.seed(1203)    # for replicability
+# Minimal window size
+r0          = round(T*(0.01 + 1.8 / sqrt(T))) 
+
+# AAPL
+# estimate test statistic and date-stamping sequence
+stest_AAPL       = rtadfr::rtadf(AAPL_fb, r0, test = "sadf", type = "none")  
+# simulate critical values and date-stamping threshold
+scvs_AAPL        = rtadfr::rtadfSim(T, nrep = 2000, r0, test = "sadf") 
+# estimate test statistic and date-stamping sequence   
+gtest_AAPL       = rtadfr::rtadf(AAPL_fb, r0, test = "gsadf", type = "none") 
+# simulate critical values and date-stamping threshold
+gcvs_AAPL        = rtadfr::rtadfSim(T, nrep = 2000, r0, test = "gsadf")  
+#MSFT
+stest_MSFT       = rtadfr::rtadf(MSFT_fb, r0, test = "sadf", type = "none")     
+gtest_MSFT       = rtadfr::rtadf(MSFT_fb, r0, test = "gsadf", type = "none") 
+
+# AMZN
+stest_AMZN       = rtadfr::rtadf(AMZN_fb, r0, test = "sadf", type = "none")     
+gtest_AMZN       = rtadfr::rtadf(AMZN_fb, r0, test = "gsadf", type = "none") 
+
+# NVDA
+stest_NVDA       = rtadfr::rtadf(NVDA_fb, r0, test = "sadf", type = "none")     
+gtest_NVDA       = rtadfr::rtadf(NVDA_fb, r0, test = "gsadf", type = "none") 
+
+# BRK
+stest_BRK       = rtadfr::rtadf(BRK_fb, r0, test = "sadf", type = "none")     
+gtest_BRK       = rtadfr::rtadf(BRK_fb, r0, test = "gsadf", type = "none") 
+
+save(stest_AAPL, scvs_AAPL, gtest_AAPL, gcvs_AAPL, stest_MSFT, gtest_MSFT, stest_AMZN, gtest_AMZN, stest_NVDA, gtest_NVDA, stest_BRK, gtest_BRK, file = "qaf1-A1-bubbles-2.RData")
+
+system("say do not despair")
+```
+
+```{r plot financial bubbles}
+#| echo: false
+#| message: false
+#| fig-height: 3
+#| fig-width: 10
+
+load("qaf1-A1-bubbles-2.RData")
+
+par(mar = c(4,4,1,1))
+par(mfrow = c(1,2))
+# plot gsadf test
+# AAPL 
+plot(x = dates_AAPL, y = gtest_AAPL$testSeq, type = "l", col = qaf2, bty = "n", xlab = "dates", ylab = "GSADF test", main = "GSADF test for AAPL", ylim = range(na.omit(c(gtest_AAPL$testSeq, gcvs_AAPL$datestampCVs[,2]))))
+lines(x = dates_AAPL, y = gcvs_AAPL$datestampCVs[,2], col = qaf1)
+text(x = dates_AAPL[950], y = 0.95, labels = "95% CV", col = qaf1)
+text(x = dates_AAPL[200], y = 3.5, labels = "AAPL test statistic", col = qaf2)
+# MSFT 
+plot(x = dates_MSFT, y = gtest_MSFT$testSeq, type = "l", col = qaf3, bty = "n", xlab = "dates", ylab = "GSADF test", main = "GSADF test for MSFT", ylim = range(na.omit(c(gtest_MSFT$testSeq, gcvs_AAPL$datestampCVs[,2]))))
+lines(x = dates_AAPL, y = gcvs_AAPL$datestampCVs[,2], col = qaf1)
+text(x = dates_AAPL[600], y = 1.1, labels = "95% CV", col = qaf1)
+text(x = dates_AAPL[200], y = 3, labels = "MSFT test statistic", col = qaf3)
+
+par(mfrow = c(1,2))
+# AMZN
+plot(x = dates_AMZN, y = gtest_AMZN$testSeq, type = "l", col = qaf4, bty = "n", xlab = "dates", ylab = "GSADF test", main = "GSADF test for AMZN", ylim = range(na.omit(c(gtest_AMZN$testSeq, gcvs_AAPL$datestampCVs[,2]))))
+lines(x = dates_AAPL, y = gcvs_AAPL$datestampCVs[,2], col = qaf1)
+text(x = dates_AAPL[400], y = 1, labels = "95% CV", col = qaf1)
+text(x = dates_AAPL[200], y = 3, labels = "AMZN test statistic", col = qaf4)
+# NVDA 
+plot(x = dates_NVDA, y = gtest_NVDA$testSeq, type = "l", col = qaf5, bty = "n", xlab = "dates", ylab = "GSADF test",main="GSADF test for NVDA", ylim = range(na.omit(c(gtest_NVDA$testSeq, gcvs_AAPL$datestampCVs[,2]))))
+lines(x = dates_AAPL, y = gcvs_AAPL$datestampCVs[,2], col = qaf1)
+text(x = dates_AAPL[700], y = 1, labels = "95% CV", col = qaf1)
+text(x = dates_AAPL[200], y = 3, labels = "NVDA test statistic", col = qaf5)
+
+par(mfrow = c(1,2))
+# BRK test statistic 
+plot(x = dates_BRK, y = gtest_BRK$testSeq, type = "l", col = qaf6, bty = "n", xlab = "dates", ylab = "GSADF test", main="GSADF test for BRK-B", ylim = range(na.omit(c(gtest_BRK$testSeq, gcvs_AAPL$datestampCVs[,2]))))
+lines(x = dates_AAPL, y = gcvs_AAPL$datestampCVs[,2], col = qaf1)
+text(x = dates_AAPL[800], y = 1, labels = "95% CV", col = qaf1)
+text(x = dates_AAPL[200], y = 3, labels = "BRK test statistic", col = qaf6)
+```
+
+The Generalised Supremum ADF detected financial bubbles in all 5 stocks during the sample period 2 Feb 2004 to 27 March 2023:
+
+1\) For Apple, five financial bubble episodes were detected in July 2007, the period from October 2007 to December 2007, in February 2011, the period from February 2012 to to October 2012, and the period from December 2018 to January 2019.
+
+2\) For Microsoft, 11 financial bubble episodes were detected in October 2007, in December 2007, the period from March 2011 to June 2011, the period from August 2011 to September 2011, in November 2011, the period from November 2012 to April 2013, the period from December 2019 to February 2020, the period from July 2020 to August 2020, in February 2021, in April 2021, and the period from June 2021 to March 2022.
+
+3\) For Amazon, four financial bubble episodes were detected in the period from July 2006 to August 2006, in November 2008, the period from January 2018 to October 2018, and the period from October 2022 to March 2023.
+
+4\) For Nvidia, seven financial bubble episodes were detected in the period from November 2005 to May 2006, the period from August 2006 to February 2007, the period from April 2007 to December 2007, the period from April 2012 to September 2015, the period from August 2018 to September 2018, the period from August 2020 to February 2021, and the period from April 2021 to March 2022.
+
+5\) For Berkshire Hathaway, four financial bubble episodes were detected in the period from November 2006 to January 2007, the period from October 2007 to February 2008, the period from June 2011 to January 2012, and the period from March 2022 to April 2022.
+
+```{r dates of bubbles}
+#| echo: false
+#| message: false
+#| results: hide
+
+# Dates of detected financial bubbles in SADF:
+dates_AAPL[stest_AAPL$testSeq > scvs_AAPL$datestampCVs[,2]]
+dates_MSFT[stest_MSFT$testSeq > scvs_AAPL$datestampCVs[,2]]
+dates_AMZN[stest_AMZN$testSeq > scvs_AAPL$datestampCVs[,2]]
+dates_NVDA[stest_NVDA$testSeq > scvs_AAPL$datestampCVs[,2]]
+dates_BRK[stest_BRK$testSeq > scvs_AAPL$datestampCVs[,2]]
+
+# Dates of detected financial bubbles in GSADF:
+dates_AAPL[gtest_AAPL$testSeq > gcvs_AAPL$datestampCVs[,2]]
+dates_MSFT[gtest_MSFT$testSeq > gcvs_AAPL$datestampCVs[,2]]
+dates_AMZN[gtest_AMZN$testSeq > gcvs_AAPL$datestampCVs[,2]]
+dates_NVDA[gtest_NVDA$testSeq > gcvs_AAPL$datestampCVs[,2]]
+dates_BRK[gtest_BRK$testSeq > gcvs_AAPL$datestampCVs[,2]]
+```
